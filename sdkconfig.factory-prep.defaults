@@ -1,0 +1,10 @@
+# Manufacturing-only one-shot image profile.
+#
+# Apply LAST, together with the normal defaults and protected production
+# profile:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production.defaults;sdkconfig.factory-prep.defaults" build
+#
+# This image draws the per-unit Security-2 QR and leaves shipping state 2.
+# It MUST be replaced by the normal field image before the unit leaves the
+# jig; the field image converts state 2 -> 1 and sleeps on its first boot.
+CONFIG_FP_FACTORY_PREP=y

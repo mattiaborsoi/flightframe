@@ -1,0 +1,22 @@
+# Production-only protected storage profile.
+#
+# Apply together with sdkconfig.defaults:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.production.defaults" build
+#
+# WARNING: release-mode flash encryption is irreversible. Run this only in
+# the controlled factory flow, after generating the unit's encrypted NVS image
+# containing fp_factory/setup_cred. It is intentionally not part of the
+# bench/default profile.
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
+CONFIG_NVS_ENCRYPTION=y
+CONFIG_NVS_SEC_KEY_PROTECT_USING_FLASH_ENC=y
+
+# Customer firmware must never inherit the bench profile's legacy host.
+CONFIG_FP_API_BASE="https://api.flightportrait.com"
+CONFIG_FP_FACTORY_PREP=n
+
+# The production jig must additionally enable ESP-IDF Secure Boot v2 and
+# project-owned signing/key custody. Secure Boot needs a protected signing-key
+# path, so its irreversible settings are not put in a copy-paste defaults
+# file: the jig verifies eFuse state, signs, flashes, and reads back every unit.

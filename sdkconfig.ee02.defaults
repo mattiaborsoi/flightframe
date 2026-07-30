@@ -1,0 +1,78 @@
+# Unit B board profile: XIAO ePaper Display Board EE02 + XIAO ESP32-S3 Plus.
+#
+# Apply on top of sdkconfig.defaults, which keeps the reTerminal E1004 map:
+#   idf.py -B build-ee02 \
+#     -DSDKCONFIG=build-ee02/sdkconfig \
+#     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ee02.defaults" build
+#
+# Unit B is a config profile, not a code change: every panel pin is already a
+# Kconfig option (main/Kconfig.projbuild). Do not edit the E1004 values in
+# sdkconfig.defaults to make this board work — Unit A must stay reproducible.
+#
+# Pin source: Seeed_GFX User_Setups/EPaper_Board_Pins_Setups.h, guarded by
+# USE_XIAO_EPAPER_DISPLAY_BOARD_EE02. The `// D7` / `// D8` comments in that
+# header are stale; the numeric values are authoritative. D-pin -> GPIO
+# resolved against Arduino core 3.3.10 variants/XIAO_ESP32S3_Plus/pins_arduino.h
+# (D8=7, D10=9, TX=43, RX=44).
+#
+# NOT YET CONFIRMED ON LIVE HARDWARE. The panel signals below are trustworthy
+# (vendor header, corroborated), but nothing here has been driven against the
+# real EE02 yet. A wrong CS or EN does not fail cleanly — it drives the panel
+# incorrectly, which reads as an art bug. Confirm with the Arduino sanity flash
+# on the real board before trusting this profile.
+
+# --- Identity ---
+# Reported to the server during setup. Without this the board inherits
+# sdkconfig.defaults' "proto-e1004" and Unit B lies about what it is in the
+# fleet record — which stops being cosmetic the moment two frames share an
+# account. Matches the credential-file naming convention.
+CONFIG_FP_HW_REV="proto-ee02"
+
+# --- Panel pins (differ from the E1004 on six of eight signals) ---
+CONFIG_FP_PIN_EPD_SCK=7
+CONFIG_FP_PIN_EPD_MOSI=9
+CONFIG_FP_PIN_EPD_CS_M=44
+CONFIG_FP_PIN_EPD_CS_S=41
+CONFIG_FP_PIN_EPD_DC=10
+CONFIG_FP_PIN_EPD_RST=38
+CONFIG_FP_PIN_EPD_BUSY=4
+CONFIG_FP_PIN_EPD_EN=43
+
+# CS_M=44 and EN=43 are UART0 RX/TX on the ESP32-S3. Console output must go to
+# USB Serial/JTAG on this board or it will drive chip-select and panel power.
+# The EE02's XIAO exposes native USB-Serial/JTAG, so this costs nothing.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+
+# --- Controls ---
+# MUST NOT be left at the sdkconfig.defaults values: the E1004 map puts KEY1 on
+# GPIO4, which is BUSY on this board. Inheriting it would drive a key handler
+# off the panel's busy line. That is why this block is present at all.
+#
+# VERIFIED on hardware 2026-07-26 by arduino-ee02-keysweep, with the XIAO's B
+# button on GPIO0 as the control:
+#
+#   printed KEY1 -> GPIO2
+#   printed KEY2 -> GPIO3
+#   printed KEY3 -> GPIO5
+#
+# Note what is and is not settled by that. The pin order is measured fact. The
+# ROLE assignment below is a decision, not a discovery: unlike the E1004, whose
+# buttons carry printed icons (circular-refresh, left arrow, right arrow) and
+# therefore had a correct answer to find, the EE02's buttons are printed only
+# KEY1/KEY2/KEY3. The silkscreen carries no semantics, so we choose.
+#
+# The choice is ordered by blast radius. Poll is the everyday control and gets
+# the first button; admin — whose ten-second hold is a DESTRUCTIVE FACTORY
+# RESET — gets the last, so a stray long-press on the obvious button cannot
+# wipe a frame.
+#
+#   KEY2 (poll now)      -> printed KEY1 / GPIO2
+#   KEY1 (pairing QR)    -> printed KEY2 / GPIO3
+#   KEY0 (admin hold)    -> printed KEY3 / GPIO5
+#
+# The enclosure's concealed plungers must follow this assignment, not the
+# E1004's. Changing it later silently re-points the factory reset.
+CONFIG_FP_PIN_KEY0=5
+CONFIG_FP_PIN_KEY1=3
+CONFIG_FP_PIN_KEY2=2
