@@ -1,0 +1,20 @@
+# Location and any other secrets live here and must never be committed.
+.env
+
+# Runtime state
+data/
+out/
+cache/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Compiled firmware images are build artifacts, never committed.
+tools/provision/fw/

@@ -1,0 +1,88 @@
+x-common: &common
+  build: .
+  env_file: .env
+  environment:
+    # Containers default to UTC. TZ here only affects logs; each tenant's
+    # awake window is computed in their own dashboard-set timezone.
+    TZ: ${TZ:-Europe/London}
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+
+  # The only adsb.lol position poller: one fetch per distinct tenant location
+  # group per cycle, snapshots for the renderer, rows into per-tenant history.
+  collector:
+    <<: *common
+    container_name: flightframe-collector
+    command: ["run-collector", "--loop", "60", "--prune", "${PRUNE_HOURS:-12}"]
+    volumes:
+      - ./data:/data
+      - ./cache:/cache
+
+  # Renders every active tenant from the collector's snapshots. Never calls
+  # adsb.lol itself.
+  renderer:
+    <<: *common
+    container_name: flightframe-renderer
+    command: ["run-renderer", "--loop", "180"]
+    volumes:
+      - ./data:/data
+      - ./out:/out
+      - ./cache:/cache
+    depends_on:
+      - collector
+
+  # Dashboard + device API. Not published directly in the cloud: caddy is the
+  # only thing on 80/443, and this port stays on the compose network. The
+  # ports mapping remains for LAN/dev use where caddy is not running.
+  web:
+    <<: *common
+    container_name: flightframe-web
+    command: ["serve", "--port", "8080"]
+    ports:
+      # Loopback by default: Docker's published ports bypass ufw entirely, so
+      # anything else silently exposes the app to the internet in plain HTTP
+      # beside Caddy. LAN/dev deployments that want direct access set
+      # WEB_BIND=0.0.0.0 in .env, knowingly.
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080"
+    volumes:
+      - ./data:/data
+      - ./out:/out
+      - ./cache:/cache
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # TLS termination with real Let's Encrypt certificates — the frames only
+  # accept public-CA https. Enabled by the "cloud" profile so LAN/dev compose
+  # keeps working without it:  docker compose --profile cloud up -d
+  caddy:
+    image: caddy:2-alpine
+    container_name: flightframe-caddy
+    profiles: ["cloud"]
+    restart: unless-stopped
+    environment:
+      FRAME_DOMAIN: ${FRAME_DOMAIN:?set FRAME_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy-data:
+  caddy-config:

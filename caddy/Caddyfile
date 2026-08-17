@@ -1,0 +1,15 @@
+# TLS termination for the frame service. The hostname comes from the
+# FRAME_DOMAIN environment variable (set in .env; compose passes it in) so
+# the repository stays deployment-agnostic.
+#
+# Behind Cloudflare use SSL mode "Full (strict)". If the zone runs Bot Fight
+# Mode, keep this record DNS-only: BFM blocks non-browser user agents,
+# including the frames' ESP32 HTTP client (error 1010). Caddy's Let's
+# Encrypt certificate is publicly valid on its own.
+
+{$FRAME_DOMAIN} {
+	encode gzip
+	reverse_proxy web:8080 {
+		header_up X-Forwarded-Proto https
+	}
+}
