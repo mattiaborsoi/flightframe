@@ -97,6 +97,17 @@ class Units(unittest.TestCase):
     def test_no_route_exceeds_earth(self):
         self.assertLess(M.from_km(12_028), 20_015)
 
+    def test_short_city_terminates_on_lone_connective(self):
+        """'La Rochelle/Île de Ré' cuts to a bare 'La', which the connective
+        stripper could not shorten further — an infinite loop that pinned the
+        droplet at 100% CPU for over an hour. Any answer is fine; returning
+        is the test."""
+        from flightframe.render.trace import _short
+        self.assertTrue(_short("La Rochelle/Île de Ré"))
+        self.assertTrue(_short("Le Grand-Quevilly"))
+        self.assertEqual(_short("Las Palmas de Gran Canaria"), "Las Palmas")
+        self.assertEqual(_short("Paisley, Renfrewshire"), "Paisley")
+
 
 class Config(unittest.TestCase):
     def test_defaults_are_the_public_placeholder(self):

@@ -249,8 +249,13 @@ def _short(city: str, limit: int = 14) -> str:
     cut = city[:limit].rsplit(" ", 1)[0].rstrip(" -–")
     # A dangling connective reads worse than a shorter name:
     # "Las Palmas de" -> "Las Palmas".
-    while cut.split(" ")[-1].lower() in ("de", "del", "di", "da", "am", "an",
-                                         "of", "the", "la", "le", "el", "on"):
+    # The `" " in cut` guard is load-bearing: when the cut is a single
+    # connective — "La Rochelle/Île de Ré" cuts to just "La" — rsplit
+    # returns the string unchanged and the loop never exits. That one city
+    # pinned the droplet's CPU for an hour.
+    while " " in cut and cut.split(" ")[-1].lower() in (
+            "de", "del", "di", "da", "am", "an",
+            "of", "the", "la", "le", "el", "on"):
         cut = cut.rsplit(" ", 1)[0]
     return cut if len(cut) >= 4 else city[: limit - 1].rstrip() + "…"
 
