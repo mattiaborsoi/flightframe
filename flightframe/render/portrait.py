@@ -105,6 +105,10 @@ def render(
     _stat(c, 90, 1350, "Distance from you",
           f"{dist:,.1f}" if dist < 10 else f"{dist:,.0f}",
           f"{units.distance_suffix}, bearing {ac.bearing_deg:03.0f}°")
+    # Fourth stat squares the grid — three values left a hole where the
+    # callsign, otherwise absent from the poster, was owed a place.
+    _stat(c, 640, 1350, "Callsign", ac.callsign or "—",
+          f"hex {ac.hex.upper()}" if ac.hex else "")
 
     c.line(90, 1520, 1110, 1520, stroke=accent, width=4)
     c.text(90, 1570, f"{now:%d %B %Y} · {now:%H:%M} · {label}", size=30, fill=blue)

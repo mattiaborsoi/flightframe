@@ -423,6 +423,7 @@ def _render_next(registry, tenant, settings) -> None:
     """The travel board, rendered from the (possibly followed) flight list."""
     from .render import next as next_design
     flights = registry.flights_for(tenant["id"], resolve_follow=True)
+    _attach_cities(flights, settings)
     followed = tenant.get("follows_flights_of")
     owner = registry.tenant(followed) if followed else tenant
     live = None
@@ -435,6 +436,26 @@ def _render_next(registry, tenant, settings) -> None:
     c = next_design.render(flights, name=(owner or tenant)["name"],
                            lang=tenant.get("lang") or "en", live=live)
     canvas_mod.render(c, settings.out_dir, "next")
+
+
+def _attach_cities(flights: list[dict], settings) -> None:
+    """Resolve airport codes to city names ("VCE" -> "Venice") from the
+    route cache, so the board can print "Venice–VCE" instead of a bare
+    code. The lookup is keyed by flight number and matched back by IATA:
+    a refreshed row whose route no longer agrees with the cache simply
+    keeps the bare code rather than borrowing the wrong city."""
+    try:
+        enr = sources.Enricher(settings.cache_dir, settings.user_agent)
+        for row in flights:
+            route = enr.route(row["flight_no"]) or {}
+            for side in ("origin", "destination"):
+                ap = route.get(side) or {}
+                code = (row.get(side) or "").upper()
+                if code and ap.get("iata_code") == code and ap.get("municipality"):
+                    row[f"{side}_city"] = ap["municipality"]
+        enr.save()
+    except Exception:
+        pass                      # city names are a bonus, never a failure
 
 
 def _live_details(row, settings) -> dict | None:

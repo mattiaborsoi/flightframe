@@ -51,15 +51,27 @@ STRINGS = {
     },
 }
 
-MONTHS_IT = ["", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
-             "luglio", "agosto", "settembre", "ottobre", "novembre",
-             "dicembre"]
+MONTHS_IT = ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
+             "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
 
 
 def _date_str(d: date, lang: str) -> str:
-    if lang == "it":
-        return f"{d.day} {MONTHS_IT[d.month]} {d.year}"
-    return f"{d:%-d %B %Y}"
+    """dd/MMM/yyyy — compact enough that queue rows keep a single line."""
+    mon = MONTHS_IT[d.month] if lang == "it" else f"{d:%b}"
+    return f"{d.day:02d}/{mon}/{d.year}"
+
+
+def _place(row: dict, side: str) -> str:
+    """"Venice–VCE" when the city is known, the bare code otherwise."""
+    code = (row.get(side) or "···").upper()
+    city = row.get(f"{side}_city")
+    return f"{_short_city(city)}–{code}" if city else code
+
+
+def _short_city(city: str, limit: int = 14) -> str:
+    """Municipality fields carry things like "Paisley, Renfrewshire"."""
+    city = city.split(",")[0].split("/")[0].split(" (")[0].strip()
+    return city if len(city) <= limit else city[: limit - 1].rstrip() + "…"
 
 
 def _countdown(days: int, t: dict) -> tuple[str, str]:
@@ -126,7 +138,6 @@ def render(
     hero, rest = flights[0], flights[1:]
     shown = rest[:7]
     hidden = len(rest) - len(shown)
-    dense = len(shown) > 3
     hero_date = date.fromisoformat(hero["date"])
     days = (hero_date - now.date()).days
     big, band = _countdown(days, t)
@@ -150,61 +161,75 @@ def render(
                stroke=palette.HEX[band], width=9)
 
     # -- hero route --------------------------------------------------------
-    o = (hero.get("origin") or "···").upper()
-    d_ = (hero.get("destination") or "···").upper()
-    size = 110 if max(len(o), len(d_)) <= 4 else 60
-    c.text(90, 570, o, size=size, weight="500", fill=blue)
-    c.path("M455 530h100m-24-16l24 16l-24 16", stroke=palette.HEX["red"],
-           width=8, fill="none", stroke_linecap="round",
-           stroke_linejoin="round")
-    c.text(610, 570, d_, size=size, weight="500", fill=blue)
-    c.text(90, 632, hero["flight_no"], size=38)
+    # "Venice–VCE" when the route cache knows the city, sized to fit the
+    # column whatever the pair of names turns out to be (§15: hierarchy
+    # from weight and size as a set — both sides share one size, always).
+    o = _place(hero, "origin")
+    d_ = _place(hero, "destination")
+    arrow = 140.0
+    size = min(110.0, (1020.0 - arrow) / (0.56 * max(len(o) + len(d_), 6)))
+    y_r = 560
+    c.text(90, y_r, o, size=size, weight="500", fill=blue, spacing=-1)
+    ax = 90 + len(o) * size * 0.56 + 34
+    ay = y_r - size * 0.34
+    c.path(f"M{ax:.0f} {ay:.0f}h72m-20-14l20 14l-20 14",
+           stroke=palette.HEX["red"], width=8, fill="none",
+           stroke_linecap="round", stroke_linejoin="round")
+    c.text(ax + 106, y_r, d_, size=size, weight="500", fill=blue, spacing=-1)
+
+    # Flight number and aircraft together on one line: the two facts a
+    # departure board would pair (§16: grouping — proximity implies
+    # relationship), auto-filled from the flight number upstream.
+    craft = (live or {}).get("type_name") or hero.get("aircraft")
+    c.text(90, 630, "  ·  ".join(x for x in (hero["flight_no"], craft) if x),
+           size=36)
 
     # -- hero details ------------------------------------------------------
-    y = 726
+    y = 712
     details: list[tuple[str, str]] = []
-    if hero.get("aircraft"):
-        details.append((t["aircraft"], hero["aircraft"]))
     if live:
-        if live.get("type_name"):
-            details[-1:] = [(t["aircraft"], live["type_name"])]
         if live.get("registration"):
             details.append((t["tail"], live["registration"]))
         if live.get("age_years"):
             details.append(("", t["age"].format(y=live["age_years"])))
     if hero.get("note"):
         details.append(("", hero["note"]))
-    for caption, value in details[: 2 if dense else 4]:
+    for caption, value in details[:3]:
         if caption:
             c.text(90, y, caption, size=26, fill=blue)
             c.text(300, y, value, size=30)
         else:
             c.text(90, y, value, size=30)
-        y += 52
+        y += 50
 
     # -- the queue ---------------------------------------------------------
     if shown:
-        top = 840 if dense else 1080
+        top = max(y + 44, 800)
         c.line(90, top, 1110, top, width=2)
         c.text(90, top + 52, t["later"], size=30, fill=blue)
-        y = top + 108
-        row_h = 64 if dense else 84
+        y = top + 110
+        # Rows stretch to spend the space that exists: two flights should
+        # not huddle at the top of an empty half-poster, and eight should
+        # still fit above the footer.
+        floor = 1440 - (36 if hidden > 0 else 0)
+        row_h = max(62.0, min(112.0, (floor - y) / len(shown)))
+        roomy = row_h >= 78
         for row in shown:
             d2 = date.fromisoformat(row["date"])
             dd = (d2 - now.date()).days
             small, band2 = _countdown(dd, t)
-            _plane(c, 116, y - 10, 40 if dense else 44,
-                   palette.HEX[band2])
+            _plane(c, 116, y - 10, 44 if roomy else 40, palette.HEX[band2])
             route = f"{(row.get('origin') or '?').upper()}–" \
                     f"{(row.get('destination') or '?').upper()}"
-            c.text(160, y, f"{route}  ·  {row['flight_no']}"
-                   + (f" · {row['dep_time']}" if row.get("dep_time")
-                      and dense else ""), size=28 if dense else 32)
+            left = "  ·  ".join(x for x in (
+                route, row["flight_no"], row.get("dep_time"),
+                row.get("aircraft")) if x)
+            c.text(160, y, left, size=31 if roomy else 28)
             c.text(1110, y, f"{_date_str(d2, lang)} · {small.lower()}",
-                   size=25 if dense else 28, fill=blue, anchor="end")
+                   size=28 if roomy else 25, fill=blue, anchor="end")
             y += row_h
         if hidden > 0:
-            c.text(160, y + 6, t["more"].format(n=hidden), size=27,
+            c.text(160, y + 2, t["more"].format(n=hidden), size=27,
                    fill=blue)
 
     c.line(90, 1470, 1110, 1470, width=3)
