@@ -79,7 +79,17 @@ def _place(row: dict, side: str) -> str:
 def _short_city(city: str, limit: int = 14) -> str:
     """Municipality fields carry things like "Paisley, Renfrewshire"."""
     city = city.split(",")[0].split("/")[0].split(" (")[0].strip()
-    return city if len(city) <= limit else city[: limit - 1].rstrip() + "…"
+    if len(city) <= limit:
+        return city
+    # Cut at a word boundary when one leaves enough behind: "Frankfurt"
+    # reads better than "Frankfurt-a…". (Bounded loop — a lone connective
+    # in the trace renderer's version of this once pinned a CPU for an hour.)
+    head = city[: limit - 1]
+    best = ""
+    for sep in (" ", "-"):
+        if sep in head:
+            best = max(best, head.rsplit(sep, 1)[0].rstrip(" -"), key=len)
+    return best if len(best) >= 4 else head.rstrip() + "…"
 
 
 def _times(row: dict) -> str:
