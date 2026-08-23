@@ -173,7 +173,11 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
             continue
         if not (0 <= days_out <= REFRESH_DAYS):
             continue
-        if now - (row.get("last_refreshed") or 0) < REFRESH_HOURS * 3600:
+        # Gates and delays only publish in the final hours before departure;
+        # a flat 12h cadence would miss them. Departure day refreshes every
+        # 3h (~8 extra calls per flight, still far inside the free tiers).
+        cadence_h = 3 if days_out == 0 else REFRESH_HOURS
+        if now - (row.get("last_refreshed") or 0) < cadence_h * 3600:
             continue
         fields = {}
         if not (row.get("origin") and row.get("destination")):
