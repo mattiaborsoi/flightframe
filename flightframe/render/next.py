@@ -82,6 +82,27 @@ def _short_city(city: str, limit: int = 14) -> str:
     return city if len(city) <= limit else city[: limit - 1].rstrip() + "…"
 
 
+def _times(row: dict) -> str:
+    """"23:20–19:00 +1": both ends in their airport's own local time, with
+    the day marker when the flight lands after midnight. Empty unless the
+    departure time is known."""
+    out = row.get("dep_time") or ""
+    if out and row.get("arr_time"):
+        out += f"–{row['arr_time']}"
+        if row.get("arr_day_offset"):
+            out += f" +{row['arr_day_offset']}"
+    return out
+
+
+def _row_route(row: dict, limit: int = 12) -> str:
+    """"Copenhagen → Seoul" when cities are known, codes otherwise."""
+    def side(key):
+        city = row.get(f"{key}_city")
+        return _short_city(city, limit) if city \
+            else (row.get(key) or "?").upper()
+    return f"{side('origin')} → {side('destination')}"
+
+
 def _countdown(days: int, t: dict) -> tuple[str, str]:
     """(big text, ink) for the countdown block."""
     if days <= 0:
@@ -157,10 +178,8 @@ def render(
     c.text(90, 330, big, size=96, weight="500", spacing=2)
     c.line(90, 358, 90 + min(len(big) * 60, 700), 358,
            stroke=palette.HEX[band], width=10)
-    times = hero.get("dep_time") or ""
-    if times and hero.get("arr_time"):
-        times += f"–{hero['arr_time']}"
-    elif hero.get("arr_time"):
+    times = _times(hero)
+    if not times and hero.get("arr_time"):
         # Airlines sometimes publish the arrival first; show what exists.
         times = t["arr"].format(hh=hero["arr_time"])
     c.text(90, 418, _date_str(hero_date, lang) + (f" · {times}" if times
@@ -246,19 +265,31 @@ def render(
         # not huddle at the top of an empty half-poster, and eight should
         # still fit above the footer.
         floor = 1440 - (36 if hidden > 0 else 0)
-        row_h = max(62.0, min(112.0, (floor - y) / len(shown)))
+        row_h = max(62.0, min(118.0, (floor - y) / len(shown)))
+        # Two-line rows when the column affords them: cities and flight
+        # number carry the row, times and aircraft sit under it in blue —
+        # the same hierarchy as the hero, in miniature. Cramped boards
+        # fall back to one dense line of codes.
         roomy = row_h >= 78
         for row in shown:
             d2 = date.fromisoformat(row["date"])
             dd = (d2 - now.date()).days
             small, band2 = _countdown(dd, t)
             _plane(c, 116, y - 10, 44 if roomy else 40, palette.HEX[band2])
-            route = f"{(row.get('origin') or '?').upper()}–" \
-                    f"{(row.get('destination') or '?').upper()}"
-            left = "  ·  ".join(x for x in (
-                route, row["flight_no"], row.get("dep_time"),
-                row.get("aircraft")) if x)
-            c.text(160, y, left, size=31 if roomy else 28)
+            if roomy:
+                c.text(160, y, f"{_row_route(row)}  ·  {row['flight_no']}",
+                       size=30)
+                sub = "  ·  ".join(x for x in (
+                    _times(row) or row.get("dep_time"),
+                    row.get("aircraft")) if x)
+                if sub:
+                    c.text(160, y + 33, sub, size=23, fill=blue)
+            else:
+                route = f"{(row.get('origin') or '?').upper()}–" \
+                        f"{(row.get('destination') or '?').upper()}"
+                left = "  ·  ".join(x for x in (
+                    route, row["flight_no"], row.get("dep_time")) if x)
+                c.text(160, y, left, size=28)
             c.text(1110, y, f"{_date_str(d2, lang)} · {small.lower()}",
                    size=28 if roomy else 25, fill=blue, anchor="end")
             y += row_h

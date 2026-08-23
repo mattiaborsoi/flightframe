@@ -220,6 +220,24 @@ class Renderers(unittest.TestCase):
         self.assertEqual(out["destination"], "VCE")
         self.assertEqual(out["aircraft"], "Airbus A320neo")
         self.assertEqual(out["registration"], "G-TTNA")
+        # Red-eye disambiguation: for a date the flight number serves twice
+        # (arriving AND departing), the leg departing that date wins, and
+        # landing past midnight sets the day offset.
+        legs2 = [
+            {"departure": {"airport": {"iata": "CPH"},
+                           "scheduledTime": {"local": "2026-11-18 23:20+01:00"}},
+             "arrival": {"airport": {"iata": "ICN"},
+                         "scheduledTime": {"local": "2026-11-19 19:00+09:00"}}},
+            {"departure": {"airport": {"iata": "CPH"},
+                           "scheduledTime": {"local": "2026-11-19 23:20+01:00"}},
+             "arrival": {"airport": {"iata": "ICN"},
+                         "scheduledTime": {"local": "2026-11-20 19:00+09:00"}}},
+        ]
+        with patch.object(schedule.sources, "_get", return_value=legs2):
+            out = schedule.scheduled_details("SK987", "2026-11-19", "k", "ua",
+                                             provider="aerodatabox")
+        self.assertEqual(out["dep_time"], "23:20")
+        self.assertEqual(out["arr_day_offset"], 1)
         with patch.object(schedule.sources, "_get", return_value=None):
             self.assertEqual(schedule.scheduled_details(
                 "BA588", "2026-08-22", "k", "ua",

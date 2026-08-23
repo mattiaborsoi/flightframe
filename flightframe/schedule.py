@@ -94,13 +94,17 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
                      "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"})
         if not isinstance(legs, list) or not legs:
             return {}
-        # A flight number can map to several legs, some sparse. Prefer the
-        # one that actually knows its departure time.
-        leg = max(legs, key=lambda l: (
-            bool(((l.get("departure") or {}).get("scheduledTime") or {})
-                 .get("local")),
-            bool(((l.get("arrival") or {}).get("scheduledTime") or {})
-                 .get("local"))))
+        # A flight number can map to several legs — sparse codeshare stubs,
+        # and for red-eyes BOTH the leg departing this date and the one
+        # arriving on it. Prefer the leg that departs on the asked-for date,
+        # then any leg that knows its departure time.
+        def _leg_key(l):
+            dep_local = ((l.get("departure") or {})
+                         .get("scheduledTime") or {}).get("local") or ""
+            arr_local = ((l.get("arrival") or {})
+                         .get("scheduledTime") or {}).get("local") or ""
+            return (dep_local[:10] == date, bool(dep_local), bool(arr_local))
+        leg = max(legs, key=_leg_key)
         dep = leg.get("departure") or {}
         arr = leg.get("arrival") or {}
         sched = (dep.get("scheduledTime") or {}).get("local")
@@ -112,6 +116,18 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
                  or (arr.get("scheduledTime") or {}).get("local"))
         if _hhmm(arr_t):
             out["arr_time"] = _hhmm(arr_t)
+            # Red-eyes land the day after they leave; the board marks the
+            # arrival with "+1". Dates compare in each airport's own local
+            # calendar, which is exactly what a passenger's watch does.
+            dep_date = (revised or sched or "")[:10] or date
+            try:
+                from datetime import date as _d
+                offset = (_d.fromisoformat(arr_t[:10])
+                          - _d.fromisoformat(dep_date)).days
+                if offset > 0:
+                    out["arr_day_offset"] = offset
+            except ValueError:
+                pass
         for side, key in ((dep, "origin"), (arr, "destination")):
             airport = side.get("airport") or {}
             iata = (airport.get("iata") or "").strip()
@@ -184,14 +200,22 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
             days_out = (_date.fromisoformat(row["date"]) - _date.today()).days
         except ValueError:
             continue
-        if not (0 <= days_out <= REFRESH_DAYS):
+        if days_out < 0:
             continue
-        # Gates and delays only publish in the final hours before departure;
-        # a flat 12h cadence would miss them. Departure day refreshes every
-        # 3h (~8 extra calls per flight, still far inside the free tiers).
-        cadence_h = 3 if days_out == 0 else REFRESH_HOURS
-        if now - (row.get("last_refreshed") or 0) < cadence_h * 3600:
-            continue
+        if days_out > REFRESH_DAYS:
+            # Beyond the refresh window the schedule barely moves, but it
+            # EXISTS months out — one fill on add (retried monthly, so a
+            # not-yet-published schedule still lands eventually) gives the
+            # queue its cities and times for pennies of quota.
+            if now - (row.get("last_refreshed") or 0) < 30 * 86400:
+                continue
+        else:
+            # Gates and delays only publish in the final hours before
+            # departure; a flat 12h cadence would miss them. Departure day
+            # refreshes every 3h, still far inside the free tiers.
+            cadence_h = 3 if days_out == 0 else REFRESH_HOURS
+            if now - (row.get("last_refreshed") or 0) < cadence_h * 3600:
+                continue
         fields = {}
         if not (row.get("origin") and row.get("destination")):
             fields.update(route_autofill(row["flight_no"], cache_dir,

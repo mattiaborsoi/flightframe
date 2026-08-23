@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS upcoming_flights (
   dep_terminal TEXT, dep_gate TEXT,  -- as published, close to departure
   delay_min INTEGER,                 -- revised vs scheduled, minutes
   registration TEXT,                 -- tail assigned to the flight
-  origin_city TEXT, destination_city TEXT  -- from the schedule API
+  origin_city TEXT, destination_city TEXT,  -- from the schedule API
+  arr_day_offset INTEGER             -- 1 = lands the day after departure
 );
 """
 
@@ -104,6 +105,7 @@ _MIGRATIONS = {
         "ALTER TABLE upcoming_flights ADD COLUMN registration TEXT"],
     5: ["ALTER TABLE upcoming_flights ADD COLUMN origin_city TEXT",
         "ALTER TABLE upcoming_flights ADD COLUMN destination_city TEXT"],
+    6: ["ALTER TABLE upcoming_flights ADD COLUMN arr_day_offset INTEGER"],
 }
 
 TENANT_FIELDS = ("id", "name", "status", "lat", "lon", "label", "radius_nm",
@@ -398,7 +400,8 @@ class Registry:
         keep = {k: fields[k] for k in
                 ("dep_time", "origin", "destination", "aircraft",
                  "arr_time", "dep_terminal", "dep_gate", "delay_min",
-                 "registration", "origin_city", "destination_city")
+                 "registration", "origin_city", "destination_city",
+                 "arr_day_offset")
                 if fields.get(k)}
         sets = ", ".join(f"{k}=?" for k in keep) + (", " if keep else "")             + "last_refreshed=?"
         with self._db() as db:
