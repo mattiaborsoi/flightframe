@@ -85,15 +85,22 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
     """AeroDataBox (RapidAPI): the Flighty-grade detail — terminals, gates,
     revised times, assigned tail — on a free tier the refresh budget fits."""
     try:
+        # No dateLocalRole filter: it turned real flights into empty 204s
+        # (verified against BA588 — filtered 204, unfiltered a full leg).
         legs = sources._get(
-            f"{AERODATABOX}/{urllib.parse.quote(flight_no)}/{date}"
-            "?dateLocalRole=Departure",
+            f"{AERODATABOX}/{urllib.parse.quote(flight_no)}/{date}",
             user_agent, timeout=15, attempts=1,
             headers={"X-RapidAPI-Key": api_key,
                      "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"})
         if not isinstance(legs, list) or not legs:
             return {}
-        leg = legs[0]
+        # A flight number can map to several legs, some sparse. Prefer the
+        # one that actually knows its departure time.
+        leg = max(legs, key=lambda l: (
+            bool(((l.get("departure") or {}).get("scheduledTime") or {})
+                 .get("local")),
+            bool(((l.get("arrival") or {}).get("scheduledTime") or {})
+                 .get("local"))))
         dep = leg.get("departure") or {}
         arr = leg.get("arrival") or {}
         sched = (dep.get("scheduledTime") or {}).get("local")
