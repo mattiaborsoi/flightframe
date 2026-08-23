@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -83,7 +83,11 @@ CREATE TABLE IF NOT EXISTS upcoming_flights (
   note TEXT,
   status TEXT NOT NULL DEFAULT 'upcoming',  -- upcoming|tracking|done|missed
   created_at REAL NOT NULL,
-  last_refreshed REAL                -- schedule-API refresh stamp
+  last_refreshed REAL,               -- schedule-API refresh stamp
+  arr_time TEXT,                     -- HH:MM at the destination, optional
+  dep_terminal TEXT, dep_gate TEXT,  -- as published, close to departure
+  delay_min INTEGER,                 -- revised vs scheduled, minutes
+  registration TEXT                  -- tail assigned to the flight
 );
 """
 
@@ -92,6 +96,11 @@ _MIGRATIONS = {
     2: ["ALTER TABLE tenants ADD COLUMN lang TEXT NOT NULL DEFAULT 'en'",
         "ALTER TABLE tenants ADD COLUMN follows_flights_of TEXT"],
     3: ["ALTER TABLE upcoming_flights ADD COLUMN last_refreshed REAL"],
+    4: ["ALTER TABLE upcoming_flights ADD COLUMN arr_time TEXT",
+        "ALTER TABLE upcoming_flights ADD COLUMN dep_terminal TEXT",
+        "ALTER TABLE upcoming_flights ADD COLUMN dep_gate TEXT",
+        "ALTER TABLE upcoming_flights ADD COLUMN delay_min INTEGER",
+        "ALTER TABLE upcoming_flights ADD COLUMN registration TEXT"],
 }
 
 TENANT_FIELDS = ("id", "name", "status", "lat", "lon", "label", "radius_nm",
@@ -384,7 +393,9 @@ class Registry:
                        now: float) -> None:
         """Overwrite schedule-sourced fields; the airline's data wins."""
         keep = {k: fields[k] for k in
-                ("dep_time", "origin", "destination", "aircraft")
+                ("dep_time", "origin", "destination", "aircraft",
+                 "arr_time", "dep_terminal", "dep_gate", "delay_min",
+                 "registration")
                 if fields.get(k)}
         sets = ", ".join(f"{k}=?" for k in keep) + (", " if keep else "")             + "last_refreshed=?"
         with self._db() as db:

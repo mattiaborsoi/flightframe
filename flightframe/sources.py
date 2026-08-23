@@ -61,9 +61,11 @@ class Aircraft:
 
 
 def _get(url: str, user_agent: str, timeout: float = 20.0,
-         attempts: int = 1) -> dict[str, Any] | None:
+         attempts: int = 1,
+         headers: dict[str, str] | None = None) -> dict[str, Any] | None:
     for attempt in range(attempts):
-        req = urllib.request.Request(url, headers={"User-Agent": user_agent})
+        req = urllib.request.Request(
+            url, headers={"User-Agent": user_agent, **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))

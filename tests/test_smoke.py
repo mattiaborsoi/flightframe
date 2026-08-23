@@ -183,12 +183,47 @@ class Renderers(unittest.TestCase):
                     "date": (date.today() + timedelta(days=3)).isoformat(),
                     "dep_time": "09:40", "origin": "LHR",
                     "destination": "FCO", "aircraft": "A320neo",
+                    "origin_city": "London", "destination_city": "Rome",
+                    "arr_time": "13:10", "dep_terminal": "5",
+                    "dep_gate": "A10", "delay_min": 25,
+                    "registration": "G-TTNA",
                     "note": None, "status": "upcoming"}]
         for lang in ("en", "it"):
             with self.subTest(lang=lang):
                 self._check(next_design.render(flights, name="Test",
                                                lang=lang), f"next-{lang}")
         self._check(next_design.render([], name="Test", lang="it"), "next-0")
+
+    def test_aerodatabox_parsing(self):
+        """The provider reads AeroDataBox's leg shape into our row fields,
+        including a delay derived from revised-vs-scheduled times."""
+        from unittest.mock import patch
+        from flightframe import schedule
+        leg = [{
+            "departure": {"airport": {"iata": "LHR"},
+                          "scheduledTime": {"local": "2026-08-22 08:20+01:00"},
+                          "revisedTime": {"local": "2026-08-22 08:45+01:00"},
+                          "terminal": "5", "gate": "A10"},
+            "arrival": {"airport": {"iata": "VCE"},
+                        "scheduledTime": {"local": "2026-08-22 11:40+02:00"}},
+            "aircraft": {"reg": "G-TTNA", "model": "Airbus A320neo"},
+        }]
+        with patch.object(schedule.sources, "_get", return_value=leg):
+            out = schedule.scheduled_details("BA588", "2026-08-22", "k", "ua",
+                                             provider="aerodatabox")
+        self.assertEqual(out["dep_time"], "08:45")
+        self.assertEqual(out["arr_time"], "11:40")
+        self.assertEqual(out["delay_min"], 25)
+        self.assertEqual(out["dep_terminal"], "5")
+        self.assertEqual(out["dep_gate"], "A10")
+        self.assertEqual(out["origin"], "LHR")
+        self.assertEqual(out["destination"], "VCE")
+        self.assertEqual(out["aircraft"], "Airbus A320neo")
+        self.assertEqual(out["registration"], "G-TTNA")
+        with patch.object(schedule.sources, "_get", return_value=None):
+            self.assertEqual(schedule.scheduled_details(
+                "BA588", "2026-08-22", "k", "ua",
+                provider="aerodatabox"), {})
 
     def test_flight_every_state(self):
         for status in (SCHEDULED, AIRBORNE, OUT_OF_RANGE, LANDED):

@@ -120,7 +120,8 @@ class AppConfig:
     cache_dir: Path
     user_agent: str
     app_hosts: frozenset[str]     # hostnames we serve; used by the CSRF check
-    schedule_api_key: str = ""    # optional aviationstack key; see schedule.py
+    schedule_api_key: str = ""    # optional schedule-API key; see schedule.py
+    schedule_provider: str = "aviationstack"   # or "aerodatabox" (RapidAPI)
 
     @property
     def registry_path(self) -> Path:
@@ -153,7 +154,10 @@ def load_app(env_file: Path | None = None) -> AppConfig:
     return AppConfig(data_dir=data_dir, out_dir=out_dir, cache_dir=cache_dir,
                      user_agent=g("USER_AGENT", "flightframe/0.1"),
                      app_hosts=frozenset(hosts),
-                     schedule_api_key=str(g("SCHEDULE_API_KEY", "") or ""))
+                     schedule_api_key=str(g("SCHEDULE_API_KEY", "") or ""),
+                     schedule_provider=str(g("SCHEDULE_PROVIDER",
+                                             "aviationstack") or
+                                           "aviationstack").strip().lower())
 
 
 def for_tenant(app: AppConfig, tenant: dict) -> Settings:

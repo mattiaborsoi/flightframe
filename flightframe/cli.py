@@ -354,7 +354,8 @@ def cmd_run_renderer(args) -> int:
                 schedule_mod.refresh_due(registry, tenant["id"],
                                          app.schedule_api_key,
                                          settings.cache_dir,
-                                         settings.user_agent)
+                                         settings.user_agent,
+                                         provider=app.schedule_provider)
                 _activate_due_flights(registry, tenant, settings)
                 _render_once(fake, settings)
                 # The charge poster: cheap, and canvas.render skips the write

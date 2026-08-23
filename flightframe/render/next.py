@@ -31,6 +31,9 @@ STRINGS = {
         "later": "And after that",
         "aircraft": "Aircraft",
         "tail": "Tail",
+        "terminal": "Terminal {t}",
+        "gate": "Gate {g}",
+        "delayed": "Delayed {m} min",
         "age": "{y} years old",
         "more": "and {n} more flights",
         "footer": "updates by itself · tracks the flight live while airborne",
@@ -45,6 +48,9 @@ STRINGS = {
         "later": "E poi",
         "aircraft": "Aereo",
         "tail": "Marche",
+        "terminal": "Terminal {t}",
+        "gate": "Uscita {g}",
+        "delayed": "In ritardo di {m} min",
         "age": "{y} anni",
         "more": "e altri {n} voli",
         "footer": "si aggiorna da solo · segue il volo in diretta quando è in aria",
@@ -149,8 +155,11 @@ def render(
     c.text(90, 330, big, size=96, weight="500", spacing=2)
     c.line(90, 358, 90 + min(len(big) * 60, 700), 358,
            stroke=palette.HEX[band], width=10)
-    c.text(90, 418, _date_str(hero_date, lang)
-           + (f" · {hero['dep_time']}" if hero.get("dep_time") else ""),
+    times = hero.get("dep_time") or ""
+    if times and hero.get("arr_time"):
+        times += f"–{hero['arr_time']}"
+    c.text(90, 418, _date_str(hero_date, lang) + (f" · {times}" if times
+                                                  else ""),
            size=38, fill=blue)
 
     # The hero plane: climbing across the top-right, contrail in the
@@ -186,20 +195,29 @@ def render(
 
     # -- hero details ------------------------------------------------------
     y = 712
-    details: list[tuple[str, str]] = []
-    if live:
-        if live.get("registration"):
-            details.append((t["tail"], live["registration"]))
-        if live.get("age_years"):
-            details.append(("", t["age"].format(y=live["age_years"])))
+    details: list[tuple[str, str, str]] = []
+    if (hero.get("delay_min") or 0) > 0:
+        details.append(("", t["delayed"].format(m=hero["delay_min"]),
+                        palette.HEX["red"]))
+    where = [t["terminal"].format(t=hero["dep_terminal"])
+             if hero.get("dep_terminal") else "",
+             t["gate"].format(g=hero["dep_gate"])
+             if hero.get("dep_gate") else ""]
+    if any(where):
+        details.append(("", " · ".join(w for w in where if w), ink))
+    reg = (live or {}).get("registration") or hero.get("registration")
+    if reg:
+        details.append((t["tail"], reg, ink))
+    if live and live.get("age_years"):
+        details.append(("", t["age"].format(y=live["age_years"]), ink))
     if hero.get("note"):
-        details.append(("", hero["note"]))
-    for caption, value in details[:3]:
+        details.append(("", hero["note"], ink))
+    for caption, value, fill in details[:4]:
         if caption:
             c.text(90, y, caption, size=26, fill=blue)
-            c.text(300, y, value, size=30)
+            c.text(300, y, value, size=30, fill=fill)
         else:
-            c.text(90, y, value, size=30)
+            c.text(90, y, value, size=30, fill=fill)
         y += 50
 
     # -- the queue ---------------------------------------------------------
