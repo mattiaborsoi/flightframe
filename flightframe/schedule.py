@@ -220,9 +220,24 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
         if not (row.get("origin") and row.get("destination")):
             fields.update(route_autofill(row["flight_no"], cache_dir,
                                          user_agent))
-        fields.update(scheduled_details(row["flight_no"], row["date"],
-                                        api_key, user_agent,
-                                        provider=provider))
-        registry.flight_refresh(row["id"], fields, now)
+        if done:
+            # The free tiers meter per second as well as per month; a burst
+            # of back-to-back lookups had every flight after the first come
+            # back 429-empty and stamped as done.
+            time.sleep(1.2)
+        looked_up = scheduled_details(row["flight_no"], row["date"],
+                                      api_key, user_agent,
+                                      provider=provider)
+        fields.update(looked_up)
+        # An empty answer is a rate limit or an unpublished schedule, not a
+        # fact worth remembering for a whole cadence period: backdate the
+        # stamp so the next retry lands in about a day instead.
+        if looked_up:
+            stamp = now
+        elif days_out > REFRESH_DAYS:
+            stamp = now - 30 * 86400 + 24 * 3600   # monthly cadence, retry in ~1d
+        else:
+            stamp = now - (REFRESH_HOURS - 1) * 3600   # 12h cadence, retry in ~1h
+        registry.flight_refresh(row["id"], fields, stamp)
         done += 1
     return done
