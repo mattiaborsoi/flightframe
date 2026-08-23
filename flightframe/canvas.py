@@ -22,10 +22,12 @@ from PIL import Image
 
 from . import palette
 
-# Cairo resolves these against the host's fonts. The Dockerfile installs
-# DejaVu so that a Pi renders the same thing your laptop does; if you iterate
-# locally on macOS, Helvetica will win and metrics will differ very slightly.
-SANS = "Helvetica Neue, Helvetica, Arial, DejaVu Sans, sans-serif"
+# Cairo resolves these against the host's fonts. Inter first, everywhere:
+# the Dockerfile installs it (fonts-inter) and local previews want it too
+# (`brew install --cask font-inter`) so laptop renders, tests, and the
+# deployment share one set of glyph metrics. The fallbacks only exist so a
+# bare host still renders *something* — with visibly shifted layout.
+SANS = "Inter, Helvetica Neue, Helvetica, Arial, DejaVu Sans, sans-serif"
 SERIF = "Georgia, Times New Roman, DejaVu Serif, serif"
 
 

@@ -31,6 +31,7 @@ STRINGS = {
         "later": "And after that",
         "aircraft": "Aircraft",
         "tail": "Tail",
+        "arr": "arr. {hh}",
         "terminal": "Terminal {t}",
         "gate": "Gate {g}",
         "delayed": "Delayed {m} min",
@@ -48,6 +49,7 @@ STRINGS = {
         "later": "E poi",
         "aircraft": "Aereo",
         "tail": "Marche",
+        "arr": "arrivo {hh}",
         "terminal": "Terminal {t}",
         "gate": "Uscita {g}",
         "delayed": "In ritardo di {m} min",
@@ -158,6 +160,9 @@ def render(
     times = hero.get("dep_time") or ""
     if times and hero.get("arr_time"):
         times += f"–{hero['arr_time']}"
+    elif hero.get("arr_time"):
+        # Airlines sometimes publish the arrival first; show what exists.
+        times = t["arr"].format(hh=hero["arr_time"])
     c.text(90, 418, _date_str(hero_date, lang) + (f" · {times}" if times
                                                   else ""),
            size=38, fill=blue)
@@ -175,16 +180,25 @@ def render(
     # from weight and size as a set — both sides share one size, always).
     o = _place(hero, "origin")
     d_ = _place(hero, "destination")
-    arrow = 140.0
-    size = min(110.0, (1020.0 - arrow) / (0.56 * max(len(o) + len(d_), 6)))
+    # 0.60 em average advance: measured ~0.55 for Inter over these strings,
+    # padded so the arrow clears the glyphs even under a wider fallback
+    # face (the deployed DejaVu once put the arrow through "London–LHR").
+    est = 0.60
+    size = min(110.0, 1020.0 / (est * max(len(o) + len(d_), 6) + 1.7))
     y_r = 560
     c.text(90, y_r, o, size=size, weight="500", fill=blue, spacing=-1)
-    ax = 90 + len(o) * size * 0.56 + 34
+    # The arrow scales with the type: span, head, and stroke are all in em,
+    # so it reads as punctuation of the route rather than an afterthought.
+    ax = 90 + len(o) * size * est + size * 0.30
     ay = y_r - size * 0.34
-    c.path(f"M{ax:.0f} {ay:.0f}h72m-20-14l20 14l-20 14",
-           stroke=palette.HEX["red"], width=8, fill="none",
-           stroke_linecap="round", stroke_linejoin="round")
-    c.text(ax + 106, y_r, d_, size=size, weight="500", fill=blue, spacing=-1)
+    seg, head = size * 0.95, size * 0.20
+    c.path(f"M{ax:.1f} {ay:.1f}h{seg:.1f}"
+           f"m-{head:.1f} -{head * 0.72:.1f}l{head:.1f} {head * 0.72:.1f}"
+           f"l-{head:.1f} {head * 0.72:.1f}",
+           stroke=palette.HEX["red"], width=max(6.0, size * 0.085),
+           fill="none", stroke_linecap="round", stroke_linejoin="round")
+    c.text(ax + seg + size * 0.45, y_r, d_, size=size, weight="500",
+           fill=blue, spacing=-1)
 
     # Flight number and aircraft together on one line: the two facts a
     # departure board would pair (§16: grouping — proximity implies
@@ -194,7 +208,7 @@ def render(
            size=36)
 
     # -- hero details ------------------------------------------------------
-    y = 712
+    y = 700
     details: list[tuple[str, str, str]] = []
     if (hero.get("delay_min") or 0) > 0:
         details.append(("", t["delayed"].format(m=hero["delay_min"]),
@@ -222,7 +236,9 @@ def render(
 
     # -- the queue ---------------------------------------------------------
     if shown:
-        top = max(y + 44, 800)
+        # Directly under the last detail row — no fixed band of dead air
+        # when the airline has published nothing yet.
+        top = min(max(y + 44, 744), 960)
         c.line(90, top, 1110, top, width=2)
         c.text(90, top + 52, t["later"], size=30, fill=blue)
         y = top + 110

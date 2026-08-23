@@ -113,9 +113,15 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
         if _hhmm(arr_t):
             out["arr_time"] = _hhmm(arr_t)
         for side, key in ((dep, "origin"), (arr, "destination")):
-            iata = ((side.get("airport") or {}).get("iata") or "").strip()
+            airport = side.get("airport") or {}
+            iata = (airport.get("iata") or "").strip()
             if iata:
                 out[key] = iata
+                # The schedule may correct the airport the route database
+                # guessed (BA588: LIN -> MXP); carrying the city with the
+                # correction keeps "Milan–MXP" from collapsing to a bare code.
+                if airport.get("municipalityName"):
+                    out[f"{key}_city"] = airport["municipalityName"]
         if dep.get("terminal"):
             out["dep_terminal"] = str(dep["terminal"])
         if dep.get("gate"):

@@ -450,6 +450,8 @@ def _attach_cities(flights: list[dict], settings) -> None:
         for row in flights:
             route = enr.route(row["flight_no"]) or {}
             for side in ("origin", "destination"):
+                if row.get(f"{side}_city"):
+                    continue          # the schedule API's own city wins
                 ap = route.get(side) or {}
                 code = (row.get(side) or "").upper()
                 if code and ap.get("iata_code") == code and ap.get("municipality"):
