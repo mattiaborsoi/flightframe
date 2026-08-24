@@ -93,9 +93,13 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
     _stat(c, 90, 1330, "Remaining", remaining, _route_note(flight, units))
 
     if footnote:
-        # The traveller's next hop — most useful mid-connection, when the
-        # person watching the frame wants to know what comes after this leg.
-        c.text(90, 1448, footnote, size=30, fill=blue)
+        # The traveller's next hop, in the stats grid's empty right cell —
+        # most useful mid-connection, when the person watching the frame
+        # wants to know what comes after this leg.
+        word, route, detail = footnote
+        c.text(640, 1319, word, size=30, fill=blue)
+        c.text(640, 1390, route, size=42, weight="500")
+        c.text(640, 1438, detail, size=27, fill=blue)
     c.line(90, 1500, 1110, 1500, stroke=accent, width=5)
     c.text(90, 1552, f"{now:%d %B %Y} · {now:%H:%M} · {label}", size=30, fill=blue)
     return c

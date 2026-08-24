@@ -442,7 +442,7 @@ def _activate_due_flights(registry, tenant, settings) -> None:
             registry.flight_set_status(row["id"], "missed")
 
 
-def _next_flight_line(registry, tenant) -> str | None:
+def _next_flight_line(registry, tenant) -> tuple | None:
     """"Next: Milan -> Copenhagen · SK1516 · 19/Nov/2026" for the tracked
     poster's footer — the row after the one being flown, connections first."""
     from .render.next import _date_str, _row_route
@@ -452,14 +452,13 @@ def _next_flight_line(registry, tenant) -> str | None:
     if not rows:
         return None
     row = rows[0]
-    word = "Poi" if (tenant.get("lang") or "en") == "it" else "Next"
-    d = _date.fromisoformat(row["date"])
     lang = tenant.get("lang") or "en"
-    parts = [f"{word}: {_row_route(row)}", row["flight_no"],
-             _date_str(d, lang)]
+    word = "Poi" if lang == "it" else "Next"
+    d = _date.fromisoformat(row["date"])
+    detail = [row["flight_no"], _date_str(d, lang)]
     if row.get("dep_time"):
-        parts.append(row["dep_time"])
-    return "  ·  ".join(parts)
+        detail.append(row["dep_time"])
+    return (word, _row_route(row), " · ".join(detail))
 
 
 def _takeover_open(row, now_local, settings) -> bool:
