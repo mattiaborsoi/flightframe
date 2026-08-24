@@ -23,7 +23,8 @@ BAR_X0, BAR_X1, BAR_Y = 120.0, 1080.0, 760.0
 
 
 def render(flight: Flight, *, label: str, shapes, units: Units,
-           now: datetime | None = None) -> Canvas:
+           now: datetime | None = None,
+           footnote: str | None = None) -> Canvas:
     now = now or datetime.now()
     c = Canvas(background=palette.PAPER)
     blue, red, ink = palette.HEX["blue"], palette.HEX["red"], palette.INK
@@ -91,6 +92,10 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
                      f"{units.distance_suffix}")
     _stat(c, 90, 1330, "Remaining", remaining, _route_note(flight, units))
 
+    if footnote:
+        # The traveller's next hop — most useful mid-connection, when the
+        # person watching the frame wants to know what comes after this leg.
+        c.text(90, 1448, footnote, size=30, fill=blue)
     c.line(90, 1500, 1110, 1500, stroke=accent, width=5)
     c.text(90, 1552, f"{now:%d %B %Y} · {now:%H:%M} · {label}", size=30, fill=blue)
     return c

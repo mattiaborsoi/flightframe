@@ -96,7 +96,9 @@ def _render_once(args, settings) -> int:
                     (settings.out_dir / f"flight{suffix}").unlink(missing_ok=True)
                 continue
             c = flight_design.render(tracked, label=settings.label, shapes=lib,
-                                     units=settings.units, now=now)
+                                     units=settings.units, now=now,
+                                     footnote=getattr(args, "flight_footnote",
+                                                      None))
         elif design == "liveried":
             c = liveried.render(
                 aircraft, label=settings.label, lat=settings.lat, lon=settings.lon,
@@ -357,6 +359,7 @@ def cmd_run_renderer(args) -> int:
                                          settings.user_agent,
                                          provider=app.schedule_provider)
                 _activate_due_flights(registry, tenant, settings)
+                fake.flight_footnote = _next_flight_line(registry, tenant)
                 _render_once(fake, settings)
                 # The charge poster: cheap, and canvas.render skips the write
                 # (and therefore the frame skips the blit) when unchanged.
@@ -400,11 +403,30 @@ def _activate_due_flights(registry, tenant, settings) -> None:
                       settings.user_agent)
     active = tracker.load()
     free = active is None or active.status == "expired"   # manual tracking wins
+    try:
+        now_local = datetime.now(ZoneInfo(tenant["tz"]))
+    except Exception:
+        now_local = datetime.now()
     for row in flights:
         due = _date.fromisoformat(row["date"])
-        if due == today and free:
+        if due == today and free and _takeover_open(row, now_local, settings):
             flight, _msg = tracker.start(row["flight_no"])
             if flight is not None:
+                # The schedule API outranks the static route database on
+                # where this dated flight is actually going (BA588's route
+                # entry says Linate; today's schedule says Malpensa). Keep
+                # the database's coordinates, show the schedule's airports.
+                changed = False
+                for side in ("origin", "destination"):
+                    code = (row.get(side) or "").upper()
+                    ap = getattr(flight, side)
+                    if code and len(code) == 3 and ap.get("iata") != code:
+                        ap["iata"] = code
+                        if row.get(f"{side}_city"):
+                            ap["city"] = row[f"{side}_city"]
+                        changed = True
+                if changed:
+                    tracker.save(flight)
                 tracker.poll()
                 free = False                # this frame's glass is now taken
                 if is_owner:
@@ -418,6 +440,65 @@ def _activate_due_flights(registry, tenant, settings) -> None:
                 row["id"], "done" if due <= today else "upcoming")
         elif due < today and row["status"] != "tracking":
             registry.flight_set_status(row["id"], "missed")
+
+
+def _next_flight_line(registry, tenant) -> str | None:
+    """"Next: Milan -> Copenhagen · SK1516 · 19/Nov/2026" for the tracked
+    poster's footer — the row after the one being flown, connections first."""
+    from .render.next import _date_str, _row_route
+    from datetime import date as _date
+    rows = [r for r in registry.flights_for(tenant["id"], resolve_follow=True)
+            if r["status"] == "upcoming"]
+    if not rows:
+        return None
+    row = rows[0]
+    word = "Poi" if (tenant.get("lang") or "en") == "it" else "Next"
+    d = _date.fromisoformat(row["date"])
+    lang = tenant.get("lang") or "en"
+    parts = [f"{word}: {_row_route(row)}", row["flight_no"],
+             _date_str(d, lang)]
+    if row.get("dep_time"):
+        parts.append(row["dep_time"])
+    return "  ·  ".join(parts)
+
+
+def _takeover_open(row, now_local, settings) -> bool:
+    """Should the tracked-flight design take the glass yet?
+
+    The board used to switch over at midnight and show "waiting for it to
+    take off" for an entire day. The window opens 75 minutes before the
+    scheduled departure; with only an arrival time on file, departure is
+    estimated from the route's great-circle length; with no times at all
+    the old whole-day behaviour stands (better a dull wait than a missed
+    flight).
+    """
+    from datetime import timedelta
+    def _at(hhmm: str):
+        return now_local.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:5]),
+                                 second=0, microsecond=0)
+    try:
+        if row.get("dep_time"):
+            return now_local >= _at(row["dep_time"]) - timedelta(minutes=75)
+        if row.get("arr_time"):
+            hours = 1.5
+            try:
+                enr = sources.Enricher(settings.cache_dir, settings.user_agent)
+                route = enr.route(row["flight_no"]) or {}
+                o = route.get("origin") or {}
+                d = route.get("destination") or {}
+                km = sources.haversine_nm(o["latitude"], o["longitude"],
+                                          d["latitude"],
+                                          d["longitude"]) * 1.852
+                hours = km / 800.0 + 0.4
+            except Exception:
+                pass
+            start = _at(row["arr_time"]) - timedelta(hours=hours, minutes=60)
+            if row.get("arr_day_offset"):
+                start -= timedelta(days=row["arr_day_offset"])
+            return now_local >= start
+    except (ValueError, TypeError):
+        pass
+    return True
 
 
 def _render_next(registry, tenant, settings) -> None:
