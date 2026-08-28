@@ -233,9 +233,25 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
         else:
             # Gates and delays only publish in the final hours before
             # departure; a flat 12h cadence would miss them. Departure day
-            # refreshes every 3h, still far inside the free tiers.
-            cadence_h = 3 if days_out == 0 else REFRESH_HOURS
-            if now - (row.get("last_refreshed") or 0) < cadence_h * 3600:
+            # refreshes every 3h, tightening to 20 minutes around the
+            # departure itself so a late-posted delay reaches the glass
+            # while it still matters. A handful of calls, only on flight
+            # days, still far inside the free tiers.
+            cadence_s = (3 if days_out == 0 else REFRESH_HOURS) * 3600
+            if days_out == 0 and row.get("dep_time"):
+                try:
+                    from datetime import datetime, timedelta, timezone
+                    off = row.get("dep_offset_min")
+                    dep = datetime.fromisoformat(
+                        f"{row['date']} {row['dep_time']}").replace(
+                        tzinfo=timezone(timedelta(
+                            minutes=off if off is not None else 0)))
+                    to_dep = dep.timestamp() - now
+                    if -6 * 3600 <= to_dep <= 3 * 3600:
+                        cadence_s = 20 * 60
+                except ValueError:
+                    pass
+            if now - (row.get("last_refreshed") or 0) < cadence_s:
                 continue
         fields = {}
         if not (row.get("origin") and row.get("destination")):
