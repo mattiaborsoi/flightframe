@@ -53,9 +53,10 @@ MAX_SLEEP_S = 6 * 3600
 BUTTON_WINDOW_S = 15 * 60
 BUTTON_SLEEP_S = 150
 
-# ~10% on a 1S li-ion. Below this the frame shows the charge poster and takes
-# the longest sleep we have.
-LOW_BATTERY_MV = 3500
+# ~12-15% on a 1S li-ion resting curve. Below this the frame shows the charge
+# poster and takes the longest sleep we have. 3.6V rather than 3.5V: the pack
+# still has margin to keep waking daily for weeks while the poster nags.
+LOW_BATTERY_MV = 3600
 
 
 class DeviceAPI:

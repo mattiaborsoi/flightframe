@@ -363,8 +363,10 @@ def cmd_run_renderer(args) -> int:
                 _render_once(fake, settings)
                 # The charge poster: cheap, and canvas.render skips the write
                 # (and therefore the frame skips the blit) when unchanged.
-                canvas_mod.render(charge_design.render(label=settings.label),
-                                  settings.out_dir, "charge")
+                canvas_mod.render(
+                    charge_design.render(label=settings.label,
+                                         lang=tenant.get("lang") or "en"),
+                    settings.out_dir, "charge")
                 _render_next(registry, tenant, settings)
             except Exception as exc:     # one tenant must not kill the rest
                 print(f"render[{tenant['id']}] failed: {exc!r}",

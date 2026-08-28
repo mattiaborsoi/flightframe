@@ -11,7 +11,15 @@ from .. import palette
 from ..canvas import Canvas
 
 
-def render(*, label: str) -> Canvas:
+STRINGS = {
+    "en": ("Please charge me", "plug USB-C into the back of the frame",
+           "the sky returns on its own once charging"),
+    "it": ("Caricami, per favore", "collega il cavo USB-C dietro la cornice",
+           "le immagini tornano da sole appena in carica"),
+}
+
+
+def render(*, label: str, lang: str = "en") -> Canvas:
     c = Canvas(background=palette.PAPER)
     ink = palette.INK
     red = palette.HEX["red"]
@@ -27,11 +35,12 @@ def render(*, label: str) -> Canvas:
     c.add(f'<rect x="{bx + 26}" y="{by + 26}" width="52" '
           f'height="{bh - 52}" rx="10" fill="{red}"/>')
 
-    c.text(600, 900, "Please charge me", size=72, weight="500",
+    title, line1, line2 = STRINGS.get(lang, STRINGS["en"])
+    c.text(600, 900, title, size=72, weight="500",
            anchor="middle")
-    c.text(600, 980, "plug USB-C into the back of the frame",
+    c.text(600, 980, line1,
            size=34, anchor="middle", fill=blue)
-    c.text(600, 1040, "the sky returns on its own once charging",
+    c.text(600, 1040, line2,
            size=30, anchor="middle")
 
     c.line(90, 1470, 1110, 1470, width=3)
