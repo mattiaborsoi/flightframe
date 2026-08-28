@@ -107,7 +107,9 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
     if flight.remaining_km is not None:
         remaining = (f"{units.from_km(flight.remaining_km):,.0f} "
                      f"{units.distance_suffix}")
-    _stat(c, 90, 1330, "Remaining", remaining, _route_note(flight, units))
+    _stat(c, 90, 1330, "Remaining", remaining,
+          "progress estimated from the schedule" if est
+          else _route_note(flight, units))
 
     if footnote:
         # The traveller's next hop, in the stats grid's empty right cell —
