@@ -505,10 +505,14 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/state":
             self._json(self._state(user))
         elif path == "/api/flights":
+            # A follower tenant reads AND edits the followed tenant's
+            # list: the family frame's login manages the same flights the
+            # traveller sees. follows_flights_of is admin-set (CLI only),
+            # never dashboard-editable, so this grants nothing to friends.
             self._json({"flights": self.registry.flights_for(
                 user["tenant"]["id"], resolve_follow=True,
                 include_done=True),
-                "own": not user["tenant"].get("follows_flights_of")})
+                "own": True})
         elif path == "/api/settings":
             tenant = user["tenant"]
             self._json({k: tenant[k] for k in
@@ -690,14 +694,22 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 fid = 0
             self._json({"ok": self.registry.flight_delete(
-                user["tenant"]["id"], fid)})
+                self._flights_tenant(user), fid)})
         else:
             self._json({"ok": False, "message": "unknown endpoint"}, 404)
+
+    def _flights_tenant(self, user) -> str:
+        """Whose flight list this login manages: the followed tenant's when
+        following (the family frame edits the traveller's own list)."""
+        return (user["tenant"].get("follows_flights_of")
+                or user["tenant"]["id"])
 
     def _save_flight(self, user, body: dict) -> dict:
         import re as _re
         from datetime import date as _date
-        flight_no = str(body.get("flight_no", "")).strip().upper()
+        # Tickets and airline apps print "F9 2538"; the space is not part
+        # of the flight number.
+        flight_no = _re.sub(r"\s+", "", str(body.get("flight_no", "")).upper())
         if not _re.fullmatch(r"[A-Z0-9]{3,8}", flight_no):
             return {"ok": False, "message":
                     "flight number as printed on the ticket, e.g. BA117"}
@@ -726,7 +738,7 @@ class Handler(BaseHTTPRequestHandler):
             for key in ("origin", "destination"):
                 extra.setdefault(key, auto.get(key))
             extra = {k: v for k, v in extra.items() if v}
-        fid = self.registry.flight_add(user["tenant"]["id"], flight_no,
+        fid = self.registry.flight_add(self._flights_tenant(user), flight_no,
                                        when.isoformat(), **extra)
         return {"ok": True, "id": fid}
 

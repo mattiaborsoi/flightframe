@@ -40,7 +40,7 @@ def render(
     c = Canvas(background=palette.PAPER)
     blue = palette.HEX["blue"]
 
-    # Zoom in. The collector sweeps the full radius for the trace and rose, but
+    # Zoom in. The collector sweeps the full radius for the rose, but
     # on an elevation everything within a few km of home piles into one column,
     # so the cross-section plots a tighter window and drops the rest.
     radius_nm = radius_km / 1.852
@@ -81,7 +81,7 @@ def render(
         c.text(X0, Y0 + 88, f"below {units.altitude(floor_ft):,.0f} "
                             f"{units.altitude_suffix} not plotted",
                size=24, fill=blue)
-    # Home is the same circle-and-crosshair glyph the trace uses, so "this
+    # Home is the same circle-and-crosshair glyph the rose uses, so "this
     # point is you" reads identically across designs.
     c.path(f"M{X0 - 15} {Y0 - 15}h30M{X0} {Y0 - 30}v30", width=3.5)
     c.circle(X0, Y0 - 15, 8, width=3.5)

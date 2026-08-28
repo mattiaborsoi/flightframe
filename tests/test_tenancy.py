@@ -59,7 +59,7 @@ class Tenancy(unittest.TestCase):
         # One rendered poster each, with distinct bytes.
         for tid, fill in (("t1", b"\x11"), ("t2", b"\x22")):
             out = cls.app.tenant_out(tid)
-            (out / "trace.bin").write_bytes(fill * 960_000)
+            (out / "portrait.bin").write_bytes(fill * 960_000)
             (out / "trace.png").write_bytes(b"png-" + fill)
         handler = partial(Handler, app=cls.app, registry=cls.reg,
                           device=DeviceAPI(cls.app, cls.reg),
@@ -265,19 +265,33 @@ class FlightListIsolation(unittest.TestCase):
         self.assertEqual(len(mine["flights"]), 1)
         self.assertEqual(theirs["flights"], [])
         self.assertNotIn("BA560", json.dumps(theirs))
-        # and a follower tenant DOES see them, read-only, once admin-linked
+        # Once admin-linked, a follower manages the SAME list: the family
+        # frame's login adds and removes the traveller's flights. The link
+        # is CLI-only, so no dashboard action can ever grant this.
         self.reg.tenant_admin_update("t2", {"follows_flights_of": "t1"})
         try:
             _, followed, _ = _call(self.port, "/api/flights", cookie=cb)
             self.assertEqual(len(followed["flights"]), 1)
-            self.assertFalse(followed["own"])
-            # ...but cannot delete what isn't theirs
-            fid = followed["flights"][0]["id"]
+            self.assertTrue(followed["own"])
+            # spaces in flight numbers are normalized, not rejected
+            _, added, _ = _call(self.port, "/api/flights", "POST",
+                                {"flight_no": "F9 2538", "date": when},
+                                cookie=cb)
+            self.assertTrue(added["ok"], added)
+            _, owner_view, _ = _call(self.port, "/api/flights", cookie=ca)
+            self.assertIn("F92538", json.dumps(owner_view))
+            self.assertEqual(len(owner_view["flights"]), 2)
+            # follower deletes from the shared list too
             _, del_result, _ = _call(self.port, "/api/flights/delete", "POST",
-                                     {"id": fid}, cookie=cb)
-            self.assertFalse(del_result["ok"])
+                                     {"id": added["id"]}, cookie=cb)
+            self.assertTrue(del_result["ok"])
+            _, owner_view, _ = _call(self.port, "/api/flights", cookie=ca)
+            self.assertEqual(len(owner_view["flights"]), 1)
         finally:
             self.reg.tenant_admin_update("t2", {"follows_flights_of": None})
+        # unlinked again: t2 is back to an empty, isolated list
+        _, unlinked, _ = _call(self.port, "/api/flights", cookie=cb)
+        self.assertEqual(unlinked["flights"], [])
 
 
 
@@ -297,12 +311,12 @@ class DownloadGraceWindow(unittest.TestCase):
             token = reg.device_register("g1", "0a:00:00:00:00:09", "hw")
             out = app.tenant_out("g1")
             old = b"\x11" * 960_000
-            (out / "trace.bin").write_bytes(old)
+            (out / "portrait.bin").write_bytes(old)
             api = DeviceAPI(app, reg)
             old_hash = hashlib.sha256(old).hexdigest()
             # renderer rotates the poster: old becomes .prev, new lands
-            (out / "trace.bin").replace(out / "trace.bin.prev")
-            (out / "trace.bin").write_bytes(b"\x22" * 960_000)
+            (out / "portrait.bin").replace(out / "trace.bin.prev")
+            (out / "portrait.bin").write_bytes(b"\x22" * 960_000)
             served = api.image_by_hash(token, old_hash)
             self.assertEqual(served, old)
 

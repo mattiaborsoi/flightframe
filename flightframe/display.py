@@ -1,7 +1,7 @@
 """Which poster the frame is currently showing.
 
 Deliberately a single stored choice rather than a rotation. The designs are not
-equally good at all hours — the trace is nearly empty at 07:00, the rose has
+equally good at all hours — the rose has
 almost nothing in it before the morning bank — so cycling blindly guarantees
 the frame is regularly showing a poster at its worst. Picking one and changing
 it when you feel like it always shows something worth looking at.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .render import BY_NAME, NAMES
 
-DEFAULT = "trace"
+DEFAULT = "portrait"
 FLIGHT = "flight"
 
 

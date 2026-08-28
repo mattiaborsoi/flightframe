@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import flight, liveried, next as next_flight, portrait, rose, section, trace  # noqa: F401
+from . import flight, liveried, next as next_flight, portrait, rose, section  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -24,9 +24,6 @@ class Design:
 DESIGNS: tuple[Design, ...] = (
     Design("flight", "Tracked flight",
            "One flight followed to its destination", on_demand=True),
-    Design("trace", "Long exposure",
-           "Every track over the window, over a Thames and M25 stencil",
-           needs_history=True),
     Design("rose", "Destination rose",
            "One spoke per destination, at its true bearing and distance",
            needs_history=True),

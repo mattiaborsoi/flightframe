@@ -105,7 +105,7 @@ SETTINGS_SNIPPET = """
 </style>
 <section class="panel" id="flights">
   <h2 id="fl_title">My flights</h2>
-  <div class="note" id="fl_follow" hidden>This frame follows someone else's
+  <div class="note" id="fl_follow" hidden>This frame shares its flight list with the traveller's
     travels; the list is managed from their account.</div>
   <table id="fl_table" hidden>
     <thead><tr><th>Date</th><th>Flight</th><th>Route</th><th>Aircraft</th>

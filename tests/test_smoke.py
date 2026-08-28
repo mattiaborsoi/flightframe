@@ -16,7 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from flightframe import canvas, config, palette, units
-from flightframe.render import DESIGNS, flight, liveried, portrait, rose, section, trace
+from flightframe.render import DESIGNS, flight, liveried, portrait, rose, section
 from flightframe.sources import Aircraft
 from flightframe.tracking import AIRBORNE, LANDED, OUT_OF_RANGE, SCHEDULED, Flight
 
@@ -97,16 +97,15 @@ class Units(unittest.TestCase):
     def test_no_route_exceeds_earth(self):
         self.assertLess(M.from_km(12_028), 20_015)
 
-    def test_short_city_terminates_on_lone_connective(self):
-        """'La Rochelle/Île de Ré' cuts to a bare 'La', which the connective
-        stripper could not shorten further — an infinite loop that pinned the
-        droplet at 100% CPU for over an hour. Any answer is fine; returning
-        is the test."""
-        from flightframe.render.trace import _short
-        self.assertTrue(_short("La Rochelle/Île de Ré"))
-        self.assertTrue(_short("Le Grand-Quevilly"))
-        self.assertEqual(_short("Las Palmas de Gran Canaria"), "Las Palmas")
-        self.assertEqual(_short("Paisley, Renfrewshire"), "Paisley")
+    def test_short_city_always_terminates(self):
+        """City shorteners must return on every input: the trace design's
+        version once looped forever on 'La Rochelle/Île de Ré' and pinned
+        the droplet at 100% CPU for an hour. The design is gone; the
+        lesson guards its successor."""
+        from flightframe.render.next import _short_city
+        self.assertTrue(_short_city("La Rochelle/Île de Ré"))
+        self.assertTrue(_short_city("Le Grand-Quevilly"))
+        self.assertEqual(_short_city("Paisley, Renfrewshire"), "Paisley")
 
 
 class Config(unittest.TestCase):
@@ -158,13 +157,6 @@ class Renderers(unittest.TestCase):
         ac, heading = picked
         self._check(portrait.render(ac, heading, label="Test",
                                     shapes=NullShapes(), units=M), "portrait")
-
-    def test_trace(self):
-        tracks = {f"{i:06x}": [(51.5 + j * 0.05, -0.1 + j * 0.07, 5_000 + j * 4_000,
-                                time.time() - j * 60) for j in range(8)]
-                  for i in range(20)}
-        self._check(trace.render(tracks, label="Test", lat=51.5, lon=-0.1,
-                                 radius_nm=25, units=M), "trace")
 
     def test_rose(self):
         points = [{"city": f"City {i}", "iata": "XXX",
@@ -277,7 +269,7 @@ class DisplaySelection(unittest.TestCase):
         from flightframe.display import Selection
         with TemporaryDirectory() as tmp:
             sel = Selection(Path(tmp))
-            self.assertEqual(sel.current(), "trace")          # sane default
+            self.assertEqual(sel.current(), "portrait")       # sane default
             self.assertTrue(sel.set("rose")[0])
             self.assertEqual(sel.current(), "rose")
             self.assertFalse(sel.set("nonsense")[0])
@@ -297,7 +289,7 @@ class DisplaySelection(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             sel = Selection(Path(tmp))
             sel.path.write_text("{ not json")
-            self.assertEqual(sel.current(), "trace")
+            self.assertEqual(sel.current(), "portrait")
 
 
 class DeviceTokens(unittest.TestCase):

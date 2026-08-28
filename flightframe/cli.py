@@ -14,14 +14,13 @@ import time
 from datetime import datetime
 
 from . import canvas as canvas_mod
-from . import basemap as basemap_mod
 from .display import Selection
 from .registry import Registry
 from .tracking import Tracker
 from . import config, palette, shapes as shapes_mod, sources
 from .render import BY_NAME, NAMES as DESIGN_NAMES
 from .render import flight as flight_design
-from .render import liveried, portrait, rose, section, trace
+from .render import liveried, portrait, rose, section
 from .web import serve
 from .store import Store
 
@@ -68,7 +67,7 @@ def cmd_render(args, settings) -> int:
 
 def _render_once(args, settings) -> int:
     designs = DESIGNS if args.design == "all" else (args.design,)
-    needs_live = any(d != "trace" for d in designs)
+    needs_live = bool(designs)
     lib, aircraft = _context(settings, live=needs_live)
 
     if needs_live and aircraft is None:
@@ -130,31 +129,6 @@ def _render_once(args, settings) -> int:
                 points, label=settings.label, units=settings.units,
                 since=datetime.fromtimestamp(lo) if lo else None,
                 until=datetime.fromtimestamp(hi) if hi else None, now=now)
-        elif design == "trace":
-            store = Store(settings.data_dir / "positions.sqlite")
-            hours = args.trace_hours or settings.trace_hours
-            tracks = store.tracks(hours)
-            meta = store.track_meta(hours)
-            lo, hi = store.span(hours)
-            store.close()
-            if not tracks:
-                print("trace: no history yet — run `collect --loop 60` for a while first",
-                      file=sys.stderr)
-                continue
-            radius_km = settings.units.distance(settings.radius_nm) \
-                if settings.units.name == "metric" else settings.radius_nm * 1.852
-            c = trace.render(
-                tracks, label=settings.label, lat=settings.lat, lon=settings.lon,
-                radius_nm=settings.radius_nm, units=settings.units,
-                since=datetime.fromtimestamp(lo) if lo else None,
-                until=datetime.fromtimestamp(hi) if hi else None,
-                basemap=_bm(settings).features(settings.lat, settings.lon,
-                                               radius_km * 1.15),
-                airports=_bm(settings).airports(settings.lat, settings.lon,
-                                                radius_km * 1.15),
-                destinations=_destinations(meta, settings),
-                max_km=args.max_km, max_tracks=args.max_tracks,
-                min_points=args.min_points, now=now)
 
         if c is None:
             continue
@@ -165,12 +139,8 @@ def _render_once(args, settings) -> int:
     return 0
 
 
-def _bm(settings) -> basemap_mod.Basemap:
-    return basemap_mod.Basemap(settings.cache_dir, settings.user_agent)
-
-
 def _destinations(meta, settings) -> dict[str, dict]:
-    """hex -> destination airport, for labelling the rim of the trace.
+    """hex -> destination airport, for the rose's spokes.
 
     Enrichment is cached on disk forever, so this is one lookup per callsign
     ever seen rather than one per render.
@@ -348,9 +318,8 @@ def cmd_run_renderer(args) -> int:
             settings = config.for_tenant(app, tenant)
             fake = argparse.Namespace(
                 design="all", dither=False, svg=False, background="blue",
-                edition=1, coords=False, mode="furthest", max_km=None,
-                section_km=None, trace_hours=None, max_tracks=70,
-                min_points=3, loop=0)
+                edition=1, coords=False, mode="furthest",
+                section_km=None, loop=0)
             try:
                 from . import schedule as schedule_mod
                 schedule_mod.refresh_due(registry, tenant["id"],
@@ -703,16 +672,8 @@ def main(argv: list[str] | None = None) -> int:
                         "frame's location in every photo of it")
     r.add_argument("--mode", default="furthest",
                    choices=list(portrait.SUPERLATIVES), help="portrait: how to pick")
-    r.add_argument("--max-km", type=float, default=None,
-                   help="trace: drop tracks that never came closer than this")
     r.add_argument("--section-km", type=float, default=None,
                    help="section: how far out to plot")
-    r.add_argument("--trace-hours", type=float, default=None,
-                   help="trace: accumulation window, overrides TRACE_HOURS")
-    r.add_argument("--max-tracks", type=int, default=70,
-                   help="trace: how many tracks to draw, longest first")
-    r.add_argument("--min-points", type=int, default=3,
-                   help="trace: discard tracks with fewer samples")
     r.add_argument("--loop", type=int, default=0, metavar="SECONDS",
                    help="re-render every SECONDS (0 = once)")
     r.set_defaults(fn=cmd_render)

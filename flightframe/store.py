@@ -1,6 +1,6 @@
 """Position history.
 
-The long-exposure trace is an accumulation, so it needs samples taken
+The destination rose accumulates a window of traffic, so it needs samples taken
 continuously — including while the frame is asleep. The collector writes here
 every minute regardless of when the panel next refreshes.
 """
@@ -66,7 +66,7 @@ class Store:
     def track_meta(self, hours: float) -> dict[str, tuple[str | None, str | None]]:
         """hex -> (callsign, type), taking the most recent non-null of each.
 
-        Needed to label the trace: the drawing knows where things went, but the
+        Needed to label the rose's spokes: the drawing knows where things went, but the
         destination only exists against a callsign.
         """
         cutoff = time.time() - hours * 3600
