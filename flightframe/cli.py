@@ -344,9 +344,7 @@ def cmd_run_renderer(args) -> int:
                                                     resolve_follow=True):
                         if row["flight_no"] != tr.query:
                             continue
-                        if row.get("registration") and \
-                                tr.registration != row["registration"]:
-                            tr.registration = row["registration"]
+                        if _sync_hints(tr, row):
                             Tracker(settings.data_dir, settings.cache_dir,
                                     settings.user_agent).save(tr)
                         if tr.last_seen is None:
@@ -433,10 +431,7 @@ def _activate_due_flights(registry, tenant, settings) -> None:
                         if row.get(f"{side}_city"):
                             ap["city"] = row[f"{side}_city"]
                         changed = True
-                if row.get("registration") and \
-                        flight.registration != row["registration"]:
-                    flight.registration = row["registration"]
-                    changed = True
+                changed |= _sync_hints(flight, row)
                 if changed:
                     tracker.save(flight)
                 tracker.poll()
@@ -520,6 +515,27 @@ def _next_flight_line(registry, tenant, settings) -> tuple | None:
     if row.get("dep_time"):
         detail.append(row["dep_time"])
     return (word, _row_route(row), " · ".join(detail))
+
+
+def _sync_hints(flight, row) -> bool:
+    """Keep the tracker's identification hints fresh from the schedule:
+    tail registration, expected airframe type, and the departure instant
+    that opens the origin-airport hunt window."""
+    from .render.next import _type_code
+    changed = False
+    if row.get("registration") and flight.registration != row["registration"]:
+        flight.registration = row["registration"]
+        changed = True
+    hint = _type_code(row.get("aircraft"))
+    if hint and flight.type_hint != hint:
+        flight.type_hint = hint
+        changed = True
+    dep = _dep_instant(row)
+    epoch = dep.timestamp() if dep else None
+    if epoch and flight.dep_epoch != epoch:
+        flight.dep_epoch = epoch
+        changed = True
+    return changed
 
 
 def _arr_instant(row):

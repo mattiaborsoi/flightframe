@@ -61,6 +61,12 @@ class Flight:
     registration: str | None = None
     type: str | None = None
     history: list[list[float]] = field(default_factory=list)   # [lat, lon] samples
+    # identification: the transponder hex is the one ID that never changes
+    # mid-flight; the rest are hints for finding it at the origin airport.
+    hex: str | None = None
+    airline_icao: str | None = None   # callsign prefix, e.g. THY
+    type_hint: str | None = None      # expected ICAO type, e.g. A359
+    dep_epoch: float | None = None    # scheduled departure, absolute
 
     # -- derived ----------------------------------------------------------
 
@@ -152,6 +158,42 @@ class Flight:
         return d
 
 
+HUNT_BEFORE_S = 15 * 60           # start looking this early
+HUNT_AFTER_S = 55 * 60            # a heavy delay still gets the window
+HUNT_RADIUS_NM = 45
+
+
+def hunt_pick(candidates: list[dict], bearing_deg: float,
+              airline_icao: str | None,
+              type_hint: str | None) -> dict | None:
+    """Choose the aircraft that is this flight, from everything airborne
+    near the origin: right airline prefix on the callsign, climbing, and
+    heading toward the destination; matching the expected airframe type
+    breaks ties. Deliberately picky — a wrong lock is worse than another
+    minute of hunting."""
+    import math as _math
+    best, best_score = None, None
+    for ac in candidates:
+        callsign = (ac.get("flight") or "").strip()
+        if airline_icao and not callsign.startswith(airline_icao):
+            continue
+        alt = ac.get("alt_baro")
+        if not isinstance(alt, (int, float)) or alt > 20_000:
+            continue                      # climbing out, not cruising over
+        if (ac.get("baro_rate") or 0) < 200:
+            continue
+        track = ac.get("track")
+        if track is None:
+            continue
+        off = abs((float(track) - bearing_deg + 180) % 360 - 180)
+        if off > 65:
+            continue
+        score = off - (25 if type_hint and ac.get("t") == type_hint else 0)
+        if best_score is None or score < best_score:
+            best, best_score = ac, score
+    return best
+
+
 class Tracker:
     def __init__(self, data_dir: Path, cache_dir: Path, user_agent: str):
         self.path = data_dir / "tracking.json"
@@ -204,6 +246,7 @@ class Tracker:
             callsign=route.get("callsign_icao") or route.get("callsign") or query,
             callsign_iata=route.get("callsign_iata"),
             airline=(route.get("airline") or {}).get("name"),
+            airline_icao=(route.get("airline") or {}).get("icao"),
             origin=origin,
             destination=destination,
             started_at=time.time(),
@@ -228,13 +271,20 @@ class Tracker:
             self.clear()
             return None
 
-        raw = sources._get(
-            f"https://api.adsb.lol/v2/callsign/{flight.callsign}",
-            self.user_agent, attempts=2)
-
         seen = None
-        if raw and raw.get("ac"):
-            seen = raw["ac"][0]
+        if flight.hex:
+            # Locked on: the hex is authoritative for the rest of the leg.
+            raw = sources._get(
+                f"https://api.adsb.lol/v2/hex/{flight.hex}",
+                self.user_agent, attempts=2)
+            if raw and raw.get("ac"):
+                seen = raw["ac"][0]
+        if seen is None:
+            raw = sources._get(
+                f"https://api.adsb.lol/v2/callsign/{flight.callsign}",
+                self.user_agent, attempts=2)
+            if raw and raw.get("ac"):
+                seen = raw["ac"][0]
         if seen is None and flight.registration:
             # Airlines often fly a number under an operational callsign the
             # route database cannot predict (BAW588 flew unseen to Milan;
@@ -245,6 +295,29 @@ class Tracker:
                 self.user_agent, attempts=1)
             if raw and raw.get("ac"):
                 seen = raw["ac"][0]
+        if (seen is None and flight.hex is None and flight.origin
+                and flight.destination and flight.dep_epoch
+                and -HUNT_BEFORE_S < time.time() - flight.dep_epoch
+                < HUNT_AFTER_S):
+            # Departure-window hunt: the callsign may be unpredictable
+            # (THY1986 flew to Istanbul unseen), but only one climbing
+            # aircraft with this airline's prefix leaves this origin
+            # toward this destination around this time. Lock its hex.
+            o, d = flight.origin, flight.destination
+            raw = sources._get(
+                "https://api.adsb.lol/v2/lat/{:.4f}/lon/{:.4f}/dist/{}".format(
+                    o["lat"], o["lon"], HUNT_RADIUS_NM),
+                self.user_agent, attempts=1)
+            pick = hunt_pick(
+                (raw or {}).get("ac") or [],
+                sources.bearing(o["lat"], o["lon"], d["lat"], d["lon"]),
+                flight.airline_icao, flight.type_hint)
+            if pick is not None:
+                flight.hex = (pick.get("hex") or "").strip().lower() or None
+                real = (pick.get("flight") or "").strip()
+                if real:
+                    flight.callsign = real
+                seen = pick
 
         now = time.time()
         if seen is not None:

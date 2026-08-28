@@ -253,6 +253,28 @@ class Renderers(unittest.TestCase):
         self.assertEqual(_schedule_line(bare, {"tz": "Europe/Rome"}),
                          "TPA 12:31 – PHL 15:16")
 
+    def test_hunt_pick_is_picky(self):
+        """The origin-airport hunt must choose the climbing, on-heading
+        aircraft with the right callsign prefix — and prefer the expected
+        airframe when two candidates qualify."""
+        from flightframe.tracking import hunt_pick
+        going = {"flight": "THY4XW", "hex": "4bb197", "alt_baro": 8000,
+                 "baro_rate": 2200, "track": 110, "t": "A359"}
+        wrong_way = {"flight": "THY77J", "hex": "4bb198", "alt_baro": 9000,
+                     "baro_rate": 1800, "track": 290, "t": "A359"}
+        other_airline = {"flight": "BAW32M", "hex": "406a01",
+                         "alt_baro": 7000, "baro_rate": 2400, "track": 112,
+                         "t": "A320"}
+        cruiser = {"flight": "THY1AB", "hex": "4bb199", "alt_baro": 37000,
+                   "baro_rate": 0, "track": 108, "t": "B77W"}
+        other_type = {"flight": "THY9CD", "hex": "4bb19a", "alt_baro": 6000,
+                      "baro_rate": 2000, "track": 118, "t": "A321"}
+        cands = [wrong_way, other_airline, cruiser, other_type, going]
+        pick = hunt_pick(cands, 112.0, "THY", "A359")
+        self.assertEqual(pick["hex"], "4bb197")
+        # no prefix match at all -> refuse rather than guess
+        self.assertIsNone(hunt_pick([other_airline], 112.0, "THY", None))
+
     def test_flight_blind_estimate(self):
         """Airline says EnRoute, receivers silent: the poster shows a
         clock-estimated flight, and the render is deterministic (no
