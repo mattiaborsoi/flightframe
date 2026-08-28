@@ -275,6 +275,24 @@ class Renderers(unittest.TestCase):
         # no prefix match at all -> refuse rather than guess
         self.assertIsNone(hunt_pick([other_airline], 112.0, "THY", None))
 
+    def test_fa_pick_prefers_the_airborne_instance(self):
+        """AeroAPI returns three dated instances of a flight number; the
+        one with wheels up and not yet down is this flight."""
+        from flightframe.tracking import _fa_pick
+        import time as _t
+        items = [
+            {"ident_icao": "THY1986", "scheduled_off": "2026-08-30T15:55:00Z"},
+            {"ident_icao": "THY1986", "scheduled_off": "2026-08-29T15:55:00Z"},
+            {"ident_icao": "THY1986", "registration": "TC-LGG",
+             "scheduled_off": "2026-08-28T15:55:00Z",
+             "actual_off": "2026-08-28T17:34:49Z"},
+        ]
+        pick = _fa_pick(items, _t.time())
+        self.assertEqual(pick["registration"], "TC-LGG")
+        # nothing near now and nothing airborne -> refuse
+        far = [{"scheduled_off": "2020-01-01T00:00:00Z"}]
+        self.assertIsNone(_fa_pick(far, _t.time()))
+
     def test_flight_blind_estimate(self):
         """Airline says EnRoute, receivers silent: the poster shows a
         clock-estimated flight, and the render is deterministic (no

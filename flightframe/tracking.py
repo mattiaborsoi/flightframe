@@ -67,6 +67,8 @@ class Flight:
     airline_icao: str | None = None   # callsign prefix, e.g. THY
     type_hint: str | None = None      # expected ICAO type, e.g. A359
     dep_epoch: float | None = None    # scheduled departure, absolute
+    fa_tries: int = 0                 # AeroAPI identification attempts
+    fa_last: float | None = None
 
     # -- derived ----------------------------------------------------------
 
@@ -194,11 +196,65 @@ def hunt_pick(candidates: list[dict], bearing_deg: float,
     return best
 
 
+# AeroAPI identification: authoritative flight -> tail/ident, consulted
+# sparingly. The monthly budget is enforced HERE, not trusted to the
+# billing portal: identification-only, a handful of calls per flight,
+# hard-stopped at a count that cannot reach the plan's $5 of credit.
+FA_URL = "https://aeroapi.flightaware.com/aeroapi/flights/"
+FA_MONTHLY_BUDGET = 100
+FA_PER_FLIGHT = 6
+FA_SPACING_S = 600
+
+
+def _fa_pick(items: list[dict], now_epoch: float) -> dict | None:
+    """AeroAPI returns yesterday's, today's, and tomorrow's instance of a
+    flight number; pick the one actually flying, else nearest to now."""
+    import datetime as _dt
+    flying = [f for f in items if f.get("actual_off")
+              and not f.get("actual_on")]
+    if flying:
+        return flying[0]
+    def dist(f):
+        stamp = f.get("scheduled_off") or f.get("scheduled_out")
+        if not stamp:
+            return float("inf")
+        try:
+            t = _dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            return abs(t.timestamp() - now_epoch)
+        except ValueError:
+            return float("inf")
+    best = min(items, key=dist, default=None)
+    return best if best is not None and dist(best) < 8 * 3600 else None
+
+
+def _fa_budget_spend(cache_dir: Path) -> bool:
+    """One unit off this month's budget; False when exhausted."""
+    import datetime as _dt
+    path = cache_dir / "aeroapi_budget.json"
+    month = _dt.date.today().strftime("%Y-%m")
+    state = {"month": month, "calls": 0}
+    try:
+        loaded = json.loads(path.read_text())
+        if loaded.get("month") == month:
+            state = loaded
+    except (OSError, json.JSONDecodeError):
+        pass
+    if state["calls"] >= FA_MONTHLY_BUDGET:
+        return False
+    state["calls"] += 1
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state))
+    os.replace(tmp, path)
+    return True
+
+
 class Tracker:
-    def __init__(self, data_dir: Path, cache_dir: Path, user_agent: str):
+    def __init__(self, data_dir: Path, cache_dir: Path, user_agent: str,
+                 fa_key: str | None = None):
         self.path = data_dir / "tracking.json"
         self.cache_dir = cache_dir
         self.user_agent = user_agent
+        self.fa_key = fa_key or os.environ.get("FLIGHTAWARE_API_KEY", "")
 
     # -- persistence ------------------------------------------------------
 
@@ -285,6 +341,27 @@ class Tracker:
                 self.user_agent, attempts=2)
             if raw and raw.get("ac"):
                 seen = raw["ac"][0]
+        if (seen is None and self.fa_key and flight.hex is None
+                and not flight.registration and flight.dep_epoch
+                and -HUNT_BEFORE_S < time.time() - flight.dep_epoch
+                < HUNT_AFTER_S
+                and flight.fa_tries < FA_PER_FLIGHT
+                and (flight.fa_last is None
+                     or time.time() - flight.fa_last > FA_SPACING_S)
+                and _fa_budget_spend(self.cache_dir)):
+            # Ask FlightAware once in a while who is actually flying this
+            # number; the tail feeds the registration rung right below.
+            flight.fa_tries += 1
+            flight.fa_last = time.time()
+            raw = sources._get(FA_URL + flight.query, self.user_agent,
+                               attempts=1,
+                               headers={"x-apikey": self.fa_key})
+            pick = _fa_pick((raw or {}).get("flights") or [], time.time())
+            if pick is not None:
+                if pick.get("registration"):
+                    flight.registration = pick["registration"]
+                if pick.get("ident_icao"):
+                    flight.callsign = pick["ident_icao"]
         if seen is None and flight.registration:
             # Airlines often fly a number under an operational callsign the
             # route database cannot predict (BAW588 flew unseen to Milan;
