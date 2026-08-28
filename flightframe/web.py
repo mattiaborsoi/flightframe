@@ -466,7 +466,7 @@ class Handler(BaseHTTPRequestHandler):
             # both failure modes. Tenants with no device yet don't count.
             import time as _time
             stale = []
-            for device in self.server.registry.devices_all():
+            for device in self.registry.devices_all():
                 last = device.get("last_seen") or 0
                 if _time.time() - last > 24 * 3600:
                     stale.append(device["tenant_id"])
