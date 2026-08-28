@@ -418,7 +418,13 @@ def _activate_due_flights(registry, tenant, settings) -> None:
                     row["id"], "missed" if cancelled else "done")
             continue
         if (due == today and free and not cancelled
+                and row["status"] == "upcoming"
                 and _takeover_open(row, now_local, settings)):
+            # Only rows that have never been flown: a row already in
+            # "tracking" whose tracker session ended has LANDED — the flip
+            # to done below must win, not a fresh takeover of the same
+            # flight (TK1986 was resurrected twice this way after its
+            # 30-minute hold expired).
             flight, _msg = tracker.start(row["flight_no"])
             if flight is not None:
                 # The schedule API outranks the static route database on
