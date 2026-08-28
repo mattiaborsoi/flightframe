@@ -460,7 +460,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(_icon(512 if "512" in path else 192), "image/png")
             return
         if path == "/healthz":
-            self._json({"ok": True})
+            # Health means the whole promise, not just this process: a frame
+            # that has not polled in a day is a dark frame on someone's wall.
+            # Folding staleness in here lets ONE external uptime check watch
+            # both failure modes. Tenants with no device yet don't count.
+            import time as _time
+            stale = []
+            for device in self.server.registry.devices_all():
+                last = device.get("last_seen") or 0
+                if _time.time() - last > 24 * 3600:
+                    stale.append(device["tenant_id"])
+            if stale:
+                self._json({"ok": False, "stale_frames": stale}, status=500)
+            else:
+                self._json({"ok": True})
             return
 
         # device routes authenticate with the bearer token inside DeviceAPI

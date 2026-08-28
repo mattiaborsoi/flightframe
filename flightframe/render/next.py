@@ -61,12 +61,33 @@ STRINGS = {
 
 MONTHS_IT = ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
              "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
+WEEKDAYS_IT = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"]
+
+# The schedule APIs hand back whatever language the airport's country
+# prefers; the board sticks to English names. Small and curated: only
+# cities that have actually appeared wrong, plus their obvious siblings.
+CITY_EN = {
+    "Bâle": "Basel", "Genève": "Geneva", "Zürich": "Zurich",
+    "München": "Munich", "Köln": "Cologne", "Nürnberg": "Nuremberg",
+    "Wien": "Vienna", "Bruxelles": "Brussels", "København": "Copenhagen",
+    "Göteborg": "Gothenburg", "Praha": "Prague", "Warszawa": "Warsaw",
+    "Lisboa": "Lisbon", "Sevilla": "Seville", "Athina": "Athens",
+    "Roma": "Rome", "Milano": "Milan", "Venezia": "Venice",
+    "Napoli": "Naples", "Firenze": "Florence", "Torino": "Turin",
+}
 
 
 def _date_str(d: date, lang: str) -> str:
     """dd/MMM/yyyy — compact enough that queue rows keep a single line."""
     mon = MONTHS_IT[d.month] if lang == "it" else f"{d:%b}"
     return f"{d.day:02d}/{mon}/{d.year}"
+
+
+def _hero_date_str(d: date, lang: str) -> str:
+    """The hero date carries the weekday — people plan around "giovedì",
+    not around the 19th."""
+    wd = WEEKDAYS_IT[d.weekday()] if lang == "it" else f"{d:%a}"
+    return f"{wd} {_date_str(d, lang)}"
 
 
 def _place(row: dict, side: str) -> str:
@@ -79,6 +100,7 @@ def _place(row: dict, side: str) -> str:
 def _short_city(city: str, limit: int = 14) -> str:
     """Municipality fields carry things like "Paisley, Renfrewshire"."""
     city = city.split(",")[0].split("/")[0].split(" (")[0].strip()
+    city = CITY_EN.get(city, city)
     if len(city) <= limit:
         return city
     # Cut at a word boundary when one leaves enough behind: "Frankfurt"
@@ -185,7 +207,7 @@ def render(
         return c
 
     hero, rest = flights[0], flights[1:]
-    shown = rest[:7]
+    shown = rest[:6]
     hidden = len(rest) - len(shown)
     hero_date = date.fromisoformat(hero["date"])
     days = (hero_date - now.date()).days
@@ -206,7 +228,7 @@ def render(
     if not times and hero.get("arr_time"):
         # Airlines sometimes publish the arrival first; show what exists.
         times = t["arr"].format(hh=hero["arr_time"])
-    c.text(90, 418, _date_str(hero_date, lang) + (f" · {times}" if times
+    c.text(90, 418, _hero_date_str(hero_date, lang) + (f" · {times}" if times
                                                   else ""),
            size=38, fill=blue)
 
