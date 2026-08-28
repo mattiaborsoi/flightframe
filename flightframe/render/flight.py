@@ -95,7 +95,10 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
     # -- numbers ----------------------------------------------------------
     if schedule_line:
         # Scheduled times in both clocks: the airports' own, the viewer's.
-        c.text(90, 970, schedule_line, size=32, fill=blue)
+        # Below the live detail line when one is present — they overprinted
+        # each other on TK1986's final approach.
+        c.text(90, 1000 if detail else 970, schedule_line,
+               size=28 if detail else 32, fill=blue)
     c.line(90, 1030, 1110, 1030, width=3)
     pos = flight.position or {}
     _stat(c, 90, 1120, "Altitude",
