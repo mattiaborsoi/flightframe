@@ -105,7 +105,15 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
         c.text(640, 1390, route, size=42, weight="500")
         c.text(640, 1438, detail, size=27, fill=blue)
     c.line(90, 1500, 1110, 1500, stroke=accent, width=5)
-    c.text(90, 1552, f"{now:%d %B %Y} · {now:%H:%M} · {label}", size=30, fill=blue)
+    # The clock appears only while airborne, as a "position as of" stamp.
+    # In the waiting and landed states every render must be byte-identical:
+    # the frame blits on hash change, and a footer minute-hand was forcing
+    # a full 30-second panel refresh of an otherwise unchanged screen.
+    if flight.status == AIRBORNE:
+        c.text(90, 1552, f"{now:%d %B %Y} · {now:%H:%M} · {label}",
+               size=30, fill=blue)
+    else:
+        c.text(90, 1552, f"{now:%d %B %Y} · {label}", size=30, fill=blue)
     return c
 
 
