@@ -531,6 +531,10 @@ def _attach_cities(flights: list[dict], settings) -> None:
         enr = sources.Enricher(settings.cache_dir, settings.user_agent)
         for row in flights:
             route = enr.route(row["flight_no"]) or {}
+            airline = route.get("airline") or {}
+            if airline.get("icao"):
+                row["airline_icao"] = airline["icao"]
+                row["airline_name"] = airline.get("name")
             for side in ("origin", "destination"):
                 if row.get(f"{side}_city"):
                     continue          # the schedule API's own city wins

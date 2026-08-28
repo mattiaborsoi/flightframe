@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from .. import palette
+from .. import airlines, palette
 from ..canvas import Canvas
 
 STRINGS = {
@@ -135,14 +135,24 @@ _PLANE = _PLANE_HALF + [(-x, y) for x, y in reversed(_PLANE_HALF)]
 
 
 def _plane(c: Canvas, x: float, y: float, size: float, fill: str,
-           heading_right: bool = True) -> None:
+           heading_right: bool = True, outline: bool = False) -> None:
     """Draw the airliner at (x, y), nose to the right (or up)."""
     pts = []
     for px, py in _PLANE:
         if heading_right:
             px, py = -py, px          # rotate nose-up -> nose-right
         pts.append(f"{x + px * size:.1f},{y + py * size:.1f}")
-    c.add(f'<polygon points="{" ".join(pts)}" fill="{fill}"/>')
+    stroke = (f' stroke="{palette.INK}" stroke-width="{max(size * 0.022, 1.4):.1f}"'
+              f' stroke-linejoin="round"') if outline else ""
+    c.add(f'<polygon points="{" ".join(pts)}" fill="{fill}"{stroke}/>')
+
+
+def _livery(row: dict) -> str:
+    """The airline's brand ink, as the liveried grid paints it. White-bodied
+    carriers (BA, and any airline the table does not know) read fine here:
+    the outline carries the silhouette on paper, exactly like the grid."""
+    brand = airlines.lookup(row.get("airline_icao"), row.get("airline_name"))
+    return palette.HEX[brand.body]
 
 
 def render(
@@ -200,9 +210,9 @@ def render(
                                                   else ""),
            size=38, fill=blue)
 
-    # The hero plane: climbing across the top-right, contrail in the
-    # urgency colour. The graphics the board was missing.
-    _plane(c, 985, 300, 210, palette.HEX["blue"])
+    # The hero plane in its airline's actual livery, contrail in the
+    # urgency colour — brand carries identity, colour carries time.
+    _plane(c, 985, 300, 210, _livery(hero), outline=True)
     for gap, ln in ((0.62, 0.16), (0.88, 0.10)):
         c.line(985 - 210 * (gap + ln), 300, 985 - 210 * gap, 300,
                stroke=palette.HEX[band], width=9)
@@ -289,7 +299,8 @@ def render(
             d2 = date.fromisoformat(row["date"])
             dd = (d2 - now.date()).days
             small, band2 = _countdown(dd, t)
-            _plane(c, 116, y - 10, 44 if roomy else 40, palette.HEX[band2])
+            _plane(c, 116, y - 10, 44 if roomy else 40, _livery(row),
+                   outline=True)
             if roomy:
                 c.text(160, y, f"{_row_route(row)}  ·  {row['flight_no']}",
                        size=30)
