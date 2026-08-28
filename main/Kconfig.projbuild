@@ -111,4 +111,24 @@ menu "FlightPortrait"
             default 10000
     endmenu
 
+
+    config FP_WIFI_PORTAL
+        bool "Provision over a captive-portal hotspot instead of BLE"
+        default n
+        help
+            The frame opens an open hotspot with a join-QR on the glass;
+            any phone browser sets Wi-Fi and (optionally) the server target.
+
+    config FP_PORTAL_AP_SSID
+        string "Captive portal hotspot name prefix"
+        depends on FP_WIFI_PORTAL
+        default "Cornice"
+
+    config FP_PIN_BAT_ADC_EN
+        int "Battery divider enable GPIO"
+        default 6
+        help
+            Load-switch enable for the battery sense divider (EE02: GPIO6).
+            The ADC input itself is GPIO1/ADC1_CH0 on the EE02 family.
+
 endmenu

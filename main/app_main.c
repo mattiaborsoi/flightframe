@@ -14,6 +14,7 @@
 #include "nvs_schema.h"
 #include "ota.h"
 #include "panel.h"
+#include "portal.h"
 #include "provisioning.h"
 #include "state_machine.h"
 
@@ -293,7 +294,12 @@ void app_main(void)
     if (!token || provisioning_state) {
         bool reprovision = token;
         nvs_close(nvs);
+#if CONFIG_FP_WIFI_PORTAL
+        (void)reprovision;
+        esp_err_t err = fp_portal_provision();
+#else
         esp_err_t err = fp_provision(reprovision);
+#endif
         if (err != ESP_OK) {
             ESP_ERROR_CHECK(nvs_open(FP_NVS_NAMESPACE, NVS_READWRITE, &nvs));
             uint32_t guard = fp_panel_wait_seconds();

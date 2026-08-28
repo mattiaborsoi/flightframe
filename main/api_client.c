@@ -16,6 +16,7 @@
 #include "sdkconfig.h"
 
 #include "api_base.h"
+#include "battery.h"
 #include "nvs_schema.h"
 #include "target_contract.h"
 #include "wifi.h"
@@ -545,8 +546,12 @@ static void telemetry_headers(esp_http_client_handle_t http,
         snprintf(buf, sizeof(buf), "%d", rssi);
         esp_http_client_set_header(http, "X-Rssi", buf);
     }
-    /* TODO(hw): battery mV via ADC (GPIO1 on the E1004) / MAX17048 later.
-     * TODO(hw): X-Panel-Temp — the T133A01 has an onboard I2C temp sensor
+    uint32_t battery_mv = fp_battery_mv();
+    if (battery_mv) {
+        snprintf(buf, sizeof(buf), "%lu", (unsigned long)battery_mv);
+        esp_http_client_set_header(http, "X-Battery-Mv", buf);
+    }
+    /* TODO(hw): X-Panel-Temp — the T133A01 has an onboard I2C temp sensor
      * (TSCL/TSDA); if the E1004 routes it, this header becomes real data. */
     esp_http_client_set_header(http, "X-Fw-Version",
                                esp_app_get_description()->version);
