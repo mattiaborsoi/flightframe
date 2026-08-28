@@ -212,6 +212,9 @@ class Renderers(unittest.TestCase):
         self.assertEqual(out["destination"], "VCE")
         self.assertEqual(out["aircraft"], "Airbus A320neo")
         self.assertEqual(out["registration"], "G-TTNA")
+        # airport UTC offsets ride along, per-date so DST is pre-applied
+        self.assertEqual(out["dep_offset_min"], 60)
+        self.assertEqual(out["arr_offset_min"], 120)
         # Red-eye disambiguation: for a date the flight number serves twice
         # (arriving AND departing), the leg departing that date wins, and
         # landing past midnight sets the day offset.
@@ -234,6 +237,20 @@ class Renderers(unittest.TestCase):
             self.assertEqual(schedule.scheduled_details(
                 "BA588", "2026-08-22", "k", "ua",
                 provider="aerodatabox"), {})
+
+    def test_schedule_line_converts_clocks(self):
+        """A 12:31 Tampa departure reads 18:31 on an Italian frame."""
+        from flightframe.cli import _schedule_line
+        row = {"date": "2026-08-28", "dep_time": "12:31", "arr_time": "15:16",
+               "origin": "TPA", "destination": "PHL",
+               "dep_offset_min": -240, "arr_offset_min": -240}
+        line = _schedule_line(row, {"tz": "Europe/Rome", "lang": "it"})
+        self.assertEqual(
+            line, "TPA 12:31 – PHL 15:16   ·   in Italia 18:31 – 21:16")
+        # and without stored offsets, only the airports' clocks appear
+        bare = dict(row, dep_offset_min=None)
+        self.assertEqual(_schedule_line(bare, {"tz": "Europe/Rome"}),
+                         "TPA 12:31 – PHL 15:16")
 
     def test_flight_every_state(self):
         for status in (SCHEDULED, AIRBORNE, OUT_OF_RANGE, LANDED):

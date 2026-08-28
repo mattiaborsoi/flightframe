@@ -97,7 +97,9 @@ def _render_once(args, settings) -> int:
             c = flight_design.render(tracked, label=settings.label, shapes=lib,
                                      units=settings.units, now=now,
                                      footnote=getattr(args, "flight_footnote",
-                                                      None))
+                                                      None),
+                                     schedule_line=getattr(
+                                         args, "flight_schedule", None))
         elif design == "liveried":
             c = liveried.render(
                 aircraft, label=settings.label, lat=settings.lat, lon=settings.lon,
@@ -329,6 +331,8 @@ def cmd_run_renderer(args) -> int:
                                          provider=app.schedule_provider)
                 _activate_due_flights(registry, tenant, settings)
                 fake.flight_footnote = _next_flight_line(registry, tenant)
+                fake.flight_schedule = _tracked_schedule_line(
+                    registry, tenant)
                 _render_once(fake, settings)
                 # The charge poster: cheap, and canvas.render skips the write
                 # (and therefore the frame skips the blit) when unchanged.
@@ -413,6 +417,44 @@ def _activate_due_flights(registry, tenant, settings) -> None:
             registry.flight_set_status(row["id"], "missed")
 
 
+def _tracked_schedule_line(registry, tenant) -> str | None:
+    """The schedule line for whichever listed flight is being tracked."""
+    for row in registry.flights_for(tenant["id"], resolve_follow=True):
+        if row["status"] == "tracking":
+            return _schedule_line(row, tenant)
+    return None
+
+
+def _schedule_line(row, tenant) -> str | None:
+    """"TPA 12:31 – PHL 15:16 · in Italia 18:31 – 21:16": the airports'
+    own clocks first, the viewer's second. Needs the stored per-airport
+    UTC offsets; without them only the airport clocks are shown."""
+    from datetime import datetime as _dt, timedelta, timezone as _tz
+    from zoneinfo import ZoneInfo
+    if not (row.get("dep_time") and row.get("arr_time")):
+        return None
+    left = (f"{(row.get('origin') or '').upper()} {row['dep_time']} – "
+            f"{(row.get('destination') or '').upper()} {row['arr_time']}")
+    if row.get("dep_offset_min") is None or row.get("arr_offset_min") is None:
+        return left
+    try:
+        tz = ZoneInfo(tenant["tz"])
+        day = _dt.fromisoformat(row["date"])
+        def local(hhmm, off, plus_days=0):
+            t = day.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:5]),
+                            tzinfo=_tz(timedelta(minutes=off)))
+            return (t + timedelta(days=plus_days)).astimezone(tz)
+        dep = local(row["dep_time"], row["dep_offset_min"])
+        arr = local(row["arr_time"], row["arr_offset_min"],
+                    row.get("arr_day_offset") or 0)
+        where = ("in Italia" if (tenant.get("lang") or "en") == "it"
+                 else tz.key.rsplit("/", 1)[-1].replace("_", " "))
+        return (f"{left}   ·   {where} {dep:%H:%M} – {arr:%H:%M}"
+                + (" +1" if arr.date() > dep.date() else ""))
+    except Exception:
+        return left
+
+
 def _next_flight_line(registry, tenant) -> tuple | None:
     """"Next: Milan -> Copenhagen · SK1516 · 19/Nov/2026" for the tracked
     poster's footer — the row after the one being flown, connections first."""
@@ -436,19 +478,31 @@ def _takeover_open(row, now_local, settings) -> bool:
     """Should the tracked-flight design take the glass yet?
 
     The board used to switch over at midnight and show "waiting for it to
-    take off" for an entire day. The window opens 75 minutes before the
-    scheduled departure; with only an arrival time on file, departure is
-    estimated from the route's great-circle length; with no times at all
-    the old whole-day behaviour stands (better a dull wait than a missed
-    flight).
+    take off" for an entire day. The window opens 2 hours before the
+    scheduled departure and the tracker itself closes it 30 minutes after
+    landing. Departure times are the AIRPORT's clock; when the schedule
+    refresh has stored that airport's UTC offset the comparison is exact
+    (a 12:31 Tampa departure is 18:31 on an Italian frame — the board
+    once took over six hours early by ignoring this, and per-date offsets
+    make summer time arrive already applied). Without an offset the
+    airport clock is read as tenant-local, the least-wrong fallback; with
+    only an arrival time, departure is estimated from the route length;
+    with no times at all the whole-day behaviour stands (better a dull
+    wait than a missed flight).
     """
-    from datetime import timedelta
-    def _at(hhmm: str):
-        return now_local.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:5]),
-                                 second=0, microsecond=0)
+    from datetime import timedelta, timezone as _tz
+    def _at(hhmm: str, offset_min=None):
+        naive = now_local.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:5]),
+                                  second=0, microsecond=0)
+        if offset_min is None:
+            return naive
+        # airport wall clock -> absolute instant -> tenant wall clock
+        instant = naive.replace(tzinfo=_tz(timedelta(minutes=offset_min)))
+        return instant.astimezone(now_local.tzinfo)
     try:
         if row.get("dep_time"):
-            return now_local >= _at(row["dep_time"]) - timedelta(minutes=75)
+            dep = _at(row["dep_time"], row.get("dep_offset_min"))
+            return now_local >= dep - timedelta(hours=2)
         if row.get("arr_time"):
             hours = 1.5
             try:
@@ -462,7 +516,8 @@ def _takeover_open(row, now_local, settings) -> bool:
                 hours = km / 800.0 + 0.4
             except Exception:
                 pass
-            start = _at(row["arr_time"]) - timedelta(hours=hours, minutes=60)
+            start = _at(row["arr_time"], row.get("arr_offset_min")) \
+                - timedelta(hours=hours, minutes=60)
             if row.get("arr_day_offset"):
                 start -= timedelta(days=row["arr_day_offset"])
             return now_local >= start

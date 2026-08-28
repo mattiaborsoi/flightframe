@@ -24,7 +24,8 @@ BAR_X0, BAR_X1, BAR_Y = 120.0, 1080.0, 760.0
 
 def render(flight: Flight, *, label: str, shapes, units: Units,
            now: datetime | None = None,
-           footnote: str | None = None) -> Canvas:
+           footnote: str | None = None,
+           schedule_line: str | None = None) -> Canvas:
     now = now or datetime.now()
     c = Canvas(background=palette.PAPER)
     blue, red, ink = palette.HEX["blue"], palette.HEX["red"], palette.INK
@@ -79,6 +80,9 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
         c.text(90, 952, detail, size=30, fill=blue)
 
     # -- numbers ----------------------------------------------------------
+    if schedule_line:
+        # Scheduled times in both clocks: the airports' own, the viewer's.
+        c.text(90, 970, schedule_line, size=32, fill=blue)
     c.line(90, 1030, 1110, 1030, width=3)
     pos = flight.position or {}
     _stat(c, 90, 1120, "Altitude",

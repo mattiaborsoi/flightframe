@@ -64,6 +64,21 @@ def scheduled_details(flight_no: str, date: str, api_key: str,
     return _aviationstack(flight_no, date, api_key, user_agent)
 
 
+def _utc_offset_min(stamp: str | None) -> int | None:
+    """"2026-08-28 12:31-04:00" -> -240. The offset is per-date, so summer
+    and winter time arrive correct without any timezone database."""
+    if not stamp or len(stamp) < 22:
+        return None
+    tail = stamp[-6:]
+    if tail[0] not in "+-" or tail[3] != ":":
+        return None
+    try:
+        minutes = int(tail[1:3]) * 60 + int(tail[4:6])
+    except ValueError:
+        return None
+    return -minutes if tail[0] == "-" else minutes
+
+
 def _hhmm(stamp: str | None) -> str | None:
     """"2026-08-22 08:20+01:00" or ISO-T variants -> "08:20"."""
     if not stamp or len(stamp) < 16:
@@ -112,10 +127,16 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
         out: dict = {}
         if _hhmm(revised or sched):
             out["dep_time"] = _hhmm(revised or sched)
+            off = _utc_offset_min(revised or sched)
+            if off is not None:
+                out["dep_offset_min"] = off
         arr_t = ((arr.get("revisedTime") or {}).get("local")
                  or (arr.get("scheduledTime") or {}).get("local"))
         if _hhmm(arr_t):
             out["arr_time"] = _hhmm(arr_t)
+            off = _utc_offset_min(arr_t)
+            if off is not None:
+                out["arr_offset_min"] = off
             # Red-eyes land the day after they leave; the board marks the
             # arrival with "+1". Dates compare in each airport's own local
             # calendar, which is exactly what a passenger's watch does.
