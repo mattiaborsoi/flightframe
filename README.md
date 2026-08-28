@@ -6,9 +6,19 @@ frame. Aircraft positions come from [adsb.lol](https://adsb.lol), routes from
 battery-powered ESP32 frame wakes every few minutes, downloads the latest
 one, and goes back to sleep.
 
+| | | |
+|:---:|:---:|:---:|
+| ![Single plane](docs/portrait.png) | ![Liveried grid](docs/liveried.png) | ![Flying next](docs/next.png) |
+| **Single plane** — one aircraft, chosen by a rotating superlative | **Liveried grid** — the sky right now, in airline colours | **Flying next** — a travel board for a frame in someone else's house |
+| ![Destination rose](docs/rose.png) | ![Charge](docs/charge.png) | |
+| **Destination rose** — where everyone overhead was going | **Low battery** — a dying frame explains itself | |
+
 Multi-tenant: each household gets an isolated dashboard (location, poster
 design, refresh cadence, awake window, timezone, flight tracking) behind an
-invite-only login.
+invite-only login. The travel board speaks the tenant's language, fills
+itself from a flight number (route, cities, times, aircraft, terminal,
+delays), follows red-eyes across midnight, and hands the glass over to live
+tracking while the flight is in the air.
 
 ## Layout
 
@@ -47,3 +57,5 @@ over live HTTP and a device-protocol simulator.
 
 Server code © Mattia Borsoi. The BLE provisioning tool vendors Espressif's
 `esp_prov` modules under Apache-2.0 (see `tools/provision/vendor/`).
+The sample posters above are renders of synthetic data over the repo's
+placeholder location.
