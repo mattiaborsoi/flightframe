@@ -330,9 +330,10 @@ def cmd_run_renderer(args) -> int:
                                          settings.user_agent,
                                          provider=app.schedule_provider)
                 _activate_due_flights(registry, tenant, settings)
-                fake.flight_footnote = _next_flight_line(registry, tenant)
+                fake.flight_footnote = _next_flight_line(registry, tenant,
+                                                          settings)
                 fake.flight_schedule = _tracked_schedule_line(
-                    registry, tenant)
+                    registry, tenant, settings)
                 _render_once(fake, settings)
                 # The charge poster: cheap, and canvas.render skips the write
                 # (and therefore the frame skips the blit) when unchanged.
@@ -417,10 +418,18 @@ def _activate_due_flights(registry, tenant, settings) -> None:
             registry.flight_set_status(row["id"], "missed")
 
 
-def _tracked_schedule_line(registry, tenant) -> str | None:
-    """The schedule line for whichever listed flight is being tracked."""
+def _tracked_schedule_line(registry, tenant, settings) -> str | None:
+    """The schedule line for the flight on this frame's tracker. Matched by
+    flight number, not row status: the status flip belongs to the OWNER's
+    render pass, and a follower frame renders first when its tenant id
+    sorts first — keying on status left the famiglia frame's poster
+    without times for a pass."""
+    tracked = Tracker(settings.data_dir, settings.cache_dir,
+                      settings.user_agent).load()
+    if tracked is None:
+        return None
     for row in registry.flights_for(tenant["id"], resolve_follow=True):
-        if row["status"] == "tracking":
+        if row["flight_no"] == tracked.query and row["status"] != "done":
             return _schedule_line(row, tenant)
     return None
 
@@ -455,13 +464,16 @@ def _schedule_line(row, tenant) -> str | None:
         return left
 
 
-def _next_flight_line(registry, tenant) -> tuple | None:
+def _next_flight_line(registry, tenant, settings) -> tuple | None:
     """"Next: Milan -> Copenhagen · SK1516 · 19/Nov/2026" for the tracked
     poster's footer — the row after the one being flown, connections first."""
     from .render.next import _date_str, _row_route
     from datetime import date as _date
+    tracked = Tracker(settings.data_dir, settings.cache_dir,
+                      settings.user_agent).load()
     rows = [r for r in registry.flights_for(tenant["id"], resolve_follow=True)
-            if r["status"] == "upcoming"]
+            if r["status"] == "upcoming"
+            and (tracked is None or r["flight_no"] != tracked.query)]
     if not rows:
         return None
     row = rows[0]
