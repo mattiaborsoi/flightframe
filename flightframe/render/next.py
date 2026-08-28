@@ -185,8 +185,12 @@ def render(
     # Ink, never a colour: yellow digits on paper are barely legible (the
     # same rule as the portrait stats). The urgency band becomes the bar
     # underneath instead.
-    c.text(90, 330, big, size=96, weight="500", spacing=2)
-    c.line(90, 358, 90 + min(len(big) * 60, 700), 358,
+    # Sized to clear the plane's contrail at x~775: "FRA 83 GIORNI" at a
+    # fixed 96px ran straight through it. The bar underneath matches the
+    # text's actual width instead of guessing with a different coefficient.
+    big_size = min(96.0, 660.0 / (0.62 * max(len(big), 6)))
+    c.text(90, 330, big, size=big_size, weight="500", spacing=2)
+    c.line(90, 358, 90 + min(0.62 * big_size * len(big), 690), 358,
            stroke=palette.HEX[band], width=10)
     times = _times(hero)
     if not times and hero.get("arr_time"):
