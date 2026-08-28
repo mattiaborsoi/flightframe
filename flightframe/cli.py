@@ -99,7 +99,9 @@ def _render_once(args, settings) -> int:
                                      footnote=getattr(args, "flight_footnote",
                                                       None),
                                      schedule_line=getattr(
-                                         args, "flight_schedule", None))
+                                         args, "flight_schedule", None),
+                                     estimated=getattr(
+                                         args, "flight_estimated", None))
         elif design == "liveried":
             c = liveried.render(
                 aircraft, label=settings.label, lat=settings.lat, lon=settings.lon,
@@ -334,6 +336,22 @@ def cmd_run_renderer(args) -> int:
                                                           settings)
                 fake.flight_schedule = _tracked_schedule_line(
                     registry, tenant, settings)
+                fake.flight_estimated = None
+                tr = Tracker(settings.data_dir, settings.cache_dir,
+                             settings.user_agent).load()
+                if tr is not None:
+                    for row in registry.flights_for(tenant["id"],
+                                                    resolve_follow=True):
+                        if row["flight_no"] != tr.query:
+                            continue
+                        if row.get("registration") and \
+                                tr.registration != row["registration"]:
+                            tr.registration = row["registration"]
+                            Tracker(settings.data_dir, settings.cache_dir,
+                                    settings.user_agent).save(tr)
+                        if tr.last_seen is None:
+                            fake.flight_estimated = _estimated_progress(row)
+                        break
                 _render_once(fake, settings)
                 # The charge poster: cheap, and canvas.render skips the write
                 # (and therefore the frame skips the blit) when unchanged.
@@ -385,7 +403,21 @@ def _activate_due_flights(registry, tenant, settings) -> None:
         now_local = datetime.now()
     for row in flights:
         due = _date.fromisoformat(row["date"])
-        if due == today and free and _takeover_open(row, now_local, settings):
+        cancelled = str(row.get("airline_status") or "").startswith("Cancel")
+        if row["status"] == "tracking" and _blind_flight_over(row):
+            current = tracker.load()
+            if (current is not None and current.query == row["flight_no"]
+                    and current.last_seen is None):
+                # Only the blind case: a flight the receivers actually saw
+                # ends through the tracker's own landed/hold lifecycle.
+                tracker.clear()
+                free = True
+            if is_owner:
+                registry.flight_set_status(
+                    row["id"], "missed" if cancelled else "done")
+            continue
+        if (due == today and free and not cancelled
+                and _takeover_open(row, now_local, settings)):
             flight, _msg = tracker.start(row["flight_no"])
             if flight is not None:
                 # The schedule API outranks the static route database on
@@ -401,6 +433,10 @@ def _activate_due_flights(registry, tenant, settings) -> None:
                         if row.get(f"{side}_city"):
                             ap["city"] = row[f"{side}_city"]
                         changed = True
+                if row.get("registration") and \
+                        flight.registration != row["registration"]:
+                    flight.registration = row["registration"]
+                    changed = True
                 if changed:
                     tracker.save(flight)
                 tracker.poll()
@@ -484,6 +520,64 @@ def _next_flight_line(registry, tenant, settings) -> tuple | None:
     if row.get("dep_time"):
         detail.append(row["dep_time"])
     return (word, _row_route(row), " · ".join(detail))
+
+
+def _arr_instant(row):
+    """Absolute arrival time as an aware datetime, or None."""
+    from datetime import datetime, timedelta, timezone
+    if not (row.get("arr_time") and row.get("arr_offset_min") is not None):
+        return None
+    try:
+        t = datetime.fromisoformat(f"{row['date']} {row['arr_time']}")
+        t = t.replace(tzinfo=timezone(timedelta(
+            minutes=row["arr_offset_min"])))
+        return t + timedelta(days=row.get("arr_day_offset") or 0)
+    except ValueError:
+        return None
+
+
+def _dep_instant(row):
+    from datetime import datetime, timedelta, timezone
+    if not (row.get("dep_time") and row.get("dep_offset_min") is not None):
+        return None
+    try:
+        t = datetime.fromisoformat(f"{row['date']} {row['dep_time']}")
+        return t.replace(tzinfo=timezone(timedelta(
+            minutes=row["dep_offset_min"])))
+    except ValueError:
+        return None
+
+
+def _blind_flight_over(row) -> bool:
+    """A flight tracked only through the airline feed is over when the
+    airline says it landed (plus the same 30-minute hold live tracking
+    gets), or long after scheduled arrival as a backstop."""
+    from datetime import datetime, timedelta, timezone
+    status = str(row.get("airline_status") or "")
+    arr = _arr_instant(row)
+    now = datetime.now(timezone.utc)
+    if status.startswith("Cancel"):
+        return True
+    if arr is None:
+        return False
+    if status in ("Landed", "Arrived") and now > arr + timedelta(minutes=30):
+        return True
+    return now > arr + timedelta(hours=4)
+
+
+def _estimated_progress(row) -> dict | None:
+    """Clock-derived progress for a flight the receivers cannot see:
+    the airline says it is flying, so show the fraction of the scheduled
+    block time that has elapsed rather than a stuck 'waiting'."""
+    from datetime import datetime, timezone
+    if str(row.get("airline_status") or "") not in ("EnRoute", "Departed"):
+        return None
+    dep, arr = _dep_instant(row), _arr_instant(row)
+    if not (dep and arr) or arr <= dep:
+        return None
+    now = datetime.now(timezone.utc)
+    frac = (now - dep).total_seconds() / (arr - dep).total_seconds()
+    return {"frac": min(max(frac, 0.03), 0.97)}
 
 
 def _takeover_open(row, now_local, settings) -> bool:

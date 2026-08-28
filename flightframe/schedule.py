@@ -166,6 +166,8 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
         delay = _minutes_between(sched, revised)
         if delay is not None:
             out["delay_min"] = delay
+        if leg.get("status"):
+            out["airline_status"] = str(leg["status"])
         aircraft = leg.get("aircraft") or {}
         if aircraft.get("model"):
             out["aircraft"] = aircraft["model"]

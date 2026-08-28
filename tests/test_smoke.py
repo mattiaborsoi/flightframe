@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import time
 import unittest
+from datetime import datetime
 from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -251,6 +252,25 @@ class Renderers(unittest.TestCase):
         bare = dict(row, dep_offset_min=None)
         self.assertEqual(_schedule_line(bare, {"tz": "Europe/Rome"}),
                          "TPA 12:31 – PHL 15:16")
+
+    def test_flight_blind_estimate(self):
+        """Airline says EnRoute, receivers silent: the poster shows a
+        clock-estimated flight, and the render is deterministic (no
+        footer clock) so the panel does not re-blit needlessly."""
+        f = _flight(SCHEDULED)
+        c = flight.render(f, label="Test", shapes=NullShapes(), units=M,
+                          estimated={"frac": 0.4},
+                          schedule_line="LHR 18:34 – IST 22:35")
+        self._check(c, "blind")
+        svg1 = c.svg()
+        self.assertIn("in flight", svg1)
+        self.assertIn("waiting for a live signal", svg1)
+        from datetime import timedelta
+        c2 = flight.render(f, label="Test", shapes=NullShapes(), units=M,
+                           estimated={"frac": 0.4},
+                           schedule_line="LHR 18:34 – IST 22:35",
+                           now=datetime.now() + timedelta(minutes=7))
+        self.assertEqual(svg1, c2.svg())
 
     def test_flight_every_state(self):
         for status in (SCHEDULED, AIRBORNE, OUT_OF_RANGE, LANDED):

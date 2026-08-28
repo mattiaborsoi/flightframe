@@ -235,6 +235,16 @@ class Tracker:
         seen = None
         if raw and raw.get("ac"):
             seen = raw["ac"][0]
+        if seen is None and flight.registration:
+            # Airlines often fly a number under an operational callsign the
+            # route database cannot predict (BAW588 flew unseen to Milan;
+            # THY1986 to Istanbul likewise). The tail is unambiguous when
+            # the schedule discloses it, so hunt by registration next.
+            raw = sources._get(
+                f"https://api.adsb.lol/v2/reg/{flight.registration}",
+                self.user_agent, attempts=1)
+            if raw and raw.get("ac"):
+                seen = raw["ac"][0]
 
         now = time.time()
         if seen is not None:

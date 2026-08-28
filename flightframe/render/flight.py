@@ -25,11 +25,17 @@ BAR_X0, BAR_X1, BAR_Y = 120.0, 1080.0, 760.0
 def render(flight: Flight, *, label: str, shapes, units: Units,
            now: datetime | None = None,
            footnote: str | None = None,
-           schedule_line: str | None = None) -> Canvas:
+           schedule_line: str | None = None,
+           estimated: dict | None = None) -> Canvas:
     now = now or datetime.now()
     c = Canvas(background=palette.PAPER)
     blue, red, ink = palette.HEX["blue"], palette.HEX["red"], palette.INK
     brand = airlines.lookup(None, flight.airline)
+
+    # The airline says it is flying but no receiver has heard it (many
+    # airlines fly a number under an unpredictable operational callsign).
+    # Show an honest clock-estimated flight instead of a stuck "waiting".
+    est = estimated if (estimated and flight.status == SCHEDULED) else None
 
     accent = {
         SCHEDULED: blue,
@@ -37,9 +43,12 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
         OUT_OF_RANGE: palette.HEX["yellow"],
         LANDED: red,
     }.get(flight.status, blue)
+    if est:
+        accent = palette.HEX["green"]
 
     # -- header -----------------------------------------------------------
-    c.text(90, 148, _status_word(flight), size=34, fill=accent, spacing=3)
+    c.text(90, 148, "in flight" if est else _status_word(flight),
+           size=34, fill=accent, spacing=3)
     c.line(90, 184, 1110, 184, stroke=accent, width=5)
 
     c.text(90, 316, flight.callsign_iata or flight.callsign, size=140,
@@ -58,6 +67,8 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
 
     # -- progress ---------------------------------------------------------
     progress = flight.progress
+    if progress is None and est:
+        progress = est["frac"]
     c.line(BAR_X0, BAR_Y, BAR_X1, BAR_Y, stroke=blue, width=5,
            stroke_dasharray="2 12")
     if progress is not None:
@@ -74,8 +85,10 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
     c.circle(BAR_X1, BAR_Y, 13, fill=palette.PAPER, stroke=blue, width=5)
 
     # -- the sentence you read from the sofa ------------------------------
-    c.text(90, 900, _headline(flight, units, now), size=52, weight="500")
-    detail = _detail(flight, units, now)
+    c.text(90, 900,
+           "Departed · waiting for a live signal" if est
+           else _headline(flight, units, now), size=52, weight="500")
+    detail = None if est else _detail(flight, units, now)
     if detail:
         c.text(90, 952, detail, size=30, fill=blue)
 
