@@ -78,6 +78,8 @@ PAGE = """<!doctype html>
   .wrap { max-width:1500px; margin:0 auto; }
   header { display:flex; flex-wrap:wrap; gap:8px 20px; align-items:baseline;
            border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:18px; }
+  header #logout { margin-left:auto; font-size:13px; padding:8px 13px;
+                   color:var(--muted); }
   h1 { font-size:19px; font-weight:600; margin:0; }
   .meta { color:var(--muted); font-size:13px; }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
@@ -132,6 +134,7 @@ PAGE = """<!doctype html>
 <header>
   <h1>flightframe</h1>
   <div class="meta" id="status">loading…</div>
+  <button id="logout" title="Sign out of this browser">Sign out</button>
 </header>
 
 <div class="panel">
@@ -168,6 +171,12 @@ const statusEl = document.getElementById('status');
 const noteEl = document.getElementById('note');
 const trackedEl = document.getElementById('tracked');
 const seen = {};
+
+document.getElementById('logout').onclick = async () => {
+  try { await fetch('/logout', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:'{}'}); }
+  finally { location.href = '/login'; }
+};
 
 grid.innerHTML = DESIGNS.map(d => `
   <figure id="card-${d[0]}" hidden>
