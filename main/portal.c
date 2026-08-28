@@ -186,7 +186,11 @@ static esp_err_t save_post(httpd_req_t *req)
     strlcpy((char *)sta.ssid, ssid, sizeof(sta.ssid));
     strlcpy((char *)sta.password, pass, sizeof(sta.password));
     esp_err_t err = fp_wifi_store_credentials(&sta);
-    if (err == ESP_OK) {
+    /* The target store refuses a secret paired with the compiled-default
+     * URL (upstream treats that pairing as an error) — and with compiled
+     * defaults there is nothing to store anyway: cloud_setup falls back
+     * to the built-in secret. Store a target only when actually custom. */
+    if (err == ESP_OK && strcmp(server, CONFIG_FP_API_BASE) != 0) {
         err = fp_api_provisioning_target_set(server, secret);
     }
     memset(pass, 0, sizeof(pass));
@@ -319,8 +323,11 @@ static esp_err_t cloud_setup(void)
     char secret[80];
     err = fp_api_byos_setup_get(secret, sizeof(secret));
     if (err != ESP_OK) {
-        memset(secret, 0, sizeof(secret));
-        return err;
+        /* No stored target: compiled defaults are the deployment. */
+        strlcpy(secret, CONFIG_FP_DEV_PROVISION_SECRET, sizeof(secret));
+        if (!secret[0]) {
+            return ESP_ERR_NOT_FOUND;
+        }
     }
     fp_setup_result_t result;
     memset(&result, 0, sizeof(result));
@@ -330,10 +337,40 @@ static esp_err_t cloud_setup(void)
     if (err != ESP_OK) {
         return err;
     }
-    err = fp_pairing_complete();
+    /* fp_pairing_complete() is the BLE flow's lifecycle bookkeeping and
+     * returns INVALID_STATE when no BLE pairing ever started — which is
+     * every portal provisioning. The credential is already stored; what
+     * matters is marking provisioning complete so the next boot polls
+     * instead of registering again. */
+    /* Completion, written plainly. The BLE flow's completion helpers sit
+     * behind guards tuned for that flow's states; three portal attempts
+     * hit three different guards. What completion MEANS is three NVS
+     * facts — provisioning complete, setup no longer required, bearer
+     * usable — so write exactly those, the same values mark_complete's
+     * own tail writes, without the preambles. */
+    (void)fp_pairing_complete();
+    nvs_handle_t done = 0;
+    err = nvs_open(FP_NVS_NAMESPACE, NVS_READWRITE, &done);
     if (err == ESP_OK) {
-        err = fp_api_setup_mark_complete();
+        err = nvs_set_u8(done, FP_NVS_PROV_STATE,
+                         (uint8_t)FP_PROV_STATE_COMPLETE);
     }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(done, FP_NVS_SETUP_REQUIRED, 0);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(done, FP_NVS_TARGET_PHASE,
+                         FP_TARGET_PHASE_READY);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(done);
+    }
+    if (done != 0) {
+        nvs_close(done);
+    }
+    ESP_LOGI(TAG, "completion writes: %s (state %d, phase %d)",
+             esp_err_to_name(err), fp_prov_state_get(),
+             fp_api_target_phase());
     if (err == ESP_OK) {
         nvs_handle_t nvs;
         if (nvs_open(FP_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
