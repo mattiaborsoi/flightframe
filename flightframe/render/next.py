@@ -37,6 +37,7 @@ STRINGS = {
         "delayed": "Delayed {m} min",
         "age": "{y} years old",
         "more": "and {n} more flights",
+        "more_one": "and 1 more flight",
         "footer": "updates by itself · tracks the flight live while airborne",
     },
     "it": {
@@ -55,6 +56,7 @@ STRINGS = {
         "delayed": "In ritardo di {m} min",
         "age": "{y} anni",
         "more": "e altri {n} voli",
+        "more_one": "e un altro volo",
         "footer": "si aggiorna da solo · segue il volo in diretta quando è in aria",
     },
 }
@@ -392,8 +394,9 @@ def render(
                    size=28 if roomy else 25, fill=blue, anchor="end")
             y += row_h
         if hidden > 0:
-            c.text(160, y + 2, t["more"].format(n=hidden), size=27,
-                   fill=blue)
+            more = t["more_one"] if hidden == 1 \
+                else t["more"].format(n=hidden)
+            c.text(160, y + 2, more, size=27, fill=blue)
 
     c.line(90, 1470, 1110, 1470, width=3)
     c.text(90, 1528, t["footer"], size=26, fill=blue)
