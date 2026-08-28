@@ -516,8 +516,10 @@ def _render_next(registry, tenant, settings) -> None:
                 - _date.today()).days <= 1
         if soon:
             live = _live_details(flights[0], settings)
+    lib = shapes_mod.Library(settings.cache_dir, settings.user_agent)
     c = next_design.render(flights, name=(owner or tenant)["name"],
-                           lang=tenant.get("lang") or "en", live=live)
+                           lang=tenant.get("lang") or "en", live=live,
+                           shapes=lib)
     canvas_mod.render(c, settings.out_dir, "next")
 
 

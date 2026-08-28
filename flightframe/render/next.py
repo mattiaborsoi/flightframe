@@ -169,6 +169,54 @@ def _plane(c: Canvas, x: float, y: float, size: float, fill: str,
     c.add(f'<polygon points="{" ".join(pts)}" fill="{fill}"{stroke}/>')
 
 
+# Schedule APIs name the metal ("Airbus A350-900"); the shape library is
+# keyed by ICAO type code (A359). Ordered longest-match-first over a
+# condensed string, so "A320 NEO" never falls through to plain A320.
+_MODEL_CODES = [
+    ("A3501000", "A35K"), ("A350900", "A359"), ("A350", "A359"),
+    ("A330900", "A339"), ("A330300", "A333"), ("A330200", "A332"),
+    ("A380", "A388"), ("A321NEO", "A21N"), ("A320NEO", "A20N"),
+    ("A321", "A321"), ("A320", "A320"), ("A319", "A319"), ("A318", "A318"),
+    ("A220300", "BCS3"), ("A220100", "BCS1"), ("A220", "BCS3"),
+    ("737MAX8", "B38M"), ("737MAX9", "B39M"), ("737MAX", "B38M"),
+    ("737900", "B739"), ("737800", "B738"), ("737700", "B737"),
+    ("7478", "B748"), ("747400", "B744"), ("747", "B744"),
+    ("777300", "B77W"), ("777200", "B772"), ("777", "B772"),
+    ("78710", "B78X"), ("7879", "B789"), ("7878", "B788"), ("787", "B789"),
+    ("767", "B763"), ("757", "B752"),
+    ("E195", "E195"), ("E190", "E190"), ("E175", "E75L"),
+    ("ATR72", "AT76"), ("ATR42", "AT45"), ("Q400", "DH8D"),
+]
+_CODE_RE = __import__("re").compile(r"^[A-Z]{1,2}\d{2,3}[A-Z]{0,2}$")
+
+
+def _type_code(model: str | None) -> str | None:
+    if not model:
+        return None
+    raw = model.strip().upper()
+    if _CODE_RE.match(raw):
+        return raw                     # already an ICAO type code
+    condensed = "".join(ch for ch in raw if ch.isalnum())
+    for needle, code in _MODEL_CODES:
+        if needle in condensed:
+            return code
+    return None
+
+
+def _draw_aircraft(c: Canvas, row: dict, x: float, y: float, size: float,
+                   shapes=None) -> None:
+    """The actual airframe in its airline's livery, nose to the right —
+    the liveried grid's treatment, in miniature. Falls back to the shared
+    icon when the shape library is absent (tests) or the type unknown."""
+    fill = _livery(row)
+    shape = shapes.get(_type_code(row.get("aircraft"))) if shapes else None
+    if shape:
+        c.add(shape.group(x, y, size * 1.35, fill=fill, stroke=palette.INK,
+                          stroke_width=1.5, rotate=90))
+    else:
+        _plane(c, x, y, size, fill, outline=True)
+
+
 def _livery(row: dict) -> str:
     """The airline's brand ink, as the liveried grid paints it. White-bodied
     carriers (BA, and any airline the table does not know) read fine here:
@@ -184,6 +232,7 @@ def render(
     lang: str = "en",
     live: dict | None = None,
     now: datetime | None = None,
+    shapes=None,
 ) -> Canvas:
     """`flights` are upcoming_flights rows (soonest first). `live` is the
     optional ≤24h enrichment: {registration, type_name, age_years}."""
@@ -232,11 +281,13 @@ def render(
                                                   else ""),
            size=38, fill=blue)
 
-    # The hero plane in its airline's actual livery, contrail in the
-    # urgency colour — brand carries identity, colour carries time.
-    _plane(c, 985, 300, 210, _livery(hero), outline=True)
-    for gap, ln in ((0.62, 0.16), (0.88, 0.10)):
-        c.line(985 - 210 * (gap + ln), 300, 985 - 210 * gap, 300,
+    # The hero aircraft in its airline's actual livery, contrail in the
+    # urgency colour — brand carries identity, colour carries time. Sized
+    # so the wingtips clear the header rule above and the date line below.
+    hx, hy = 990, 318
+    _draw_aircraft(c, hero, hx, hy, 150, shapes)
+    for gap, ln in ((0.34, 0.10), (0.52, 0.07)):
+        c.line(hx - 330 * (gap + ln), hy, hx - 330 * gap, hy,
                stroke=palette.HEX[band], width=9)
 
     # -- hero route --------------------------------------------------------
@@ -321,8 +372,8 @@ def render(
             d2 = date.fromisoformat(row["date"])
             dd = (d2 - now.date()).days
             small, band2 = _countdown(dd, t)
-            _plane(c, 116, y - 10, 44 if roomy else 40, _livery(row),
-                   outline=True)
+            _draw_aircraft(c, row, 118, y - 11, 46 if roomy else 40,
+                           shapes)
             if roomy:
                 c.text(160, y, f"{_row_route(row)}  ·  {row['flight_no']}",
                        size=30)
