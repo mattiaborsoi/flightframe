@@ -22,11 +22,72 @@ from ..units import Units
 BAR_X0, BAR_X1, BAR_Y = 120.0, 1080.0, 760.0
 
 
+T = {
+    "en": {
+        "scheduled": "not yet airborne", "airborne": "in the air",
+        "out_of_range": "out of receiver range", "landed": "landed",
+        "est_head": "in flight",
+        "est_line": "Departed · waiting for a live signal",
+        "landed_at": "Landed at {hh}",
+        "waiting": "Waiting for it to take off",
+        "in_air": "In the air",
+        "min_to_go": "About {m:,.0f} minutes to go",
+        "hm_to_go": "About {h}h {m:02d}m to go",
+        "last_heard": "{where} · last heard {m:,.0f} min ago · "
+                      "no receivers out there, this is normal",
+        "hold": "showing for another {m:,.0f} minutes",
+        "arriving": "arriving about {hh}",
+        "out": "Out of range", "atlantic": "Over the Atlantic",
+        "indian": "Over the Indian Ocean", "pacific": "Over the Pacific",
+        "desert": "Over the desert", "arctic": "Over the Arctic",
+        "altitude": "Altitude", "speed": "Ground speed",
+        "remaining": "Remaining",
+        "climbing": "climbing {v}", "descending": "descending {v}",
+        "level": "level",
+        "of_total": "of {d} ({p:,.0f}% flown)",
+        "est_note": "progress estimated from the schedule",
+        "months": ["", "January", "February", "March", "April", "May",
+                   "June", "July", "August", "September", "October",
+                   "November", "December"],
+    },
+    "it": {
+        "scheduled": "non ancora in volo", "airborne": "in volo",
+        "out_of_range": "fuori portata dei ricevitori",
+        "landed": "atterrato",
+        "est_head": "in volo",
+        "est_line": "Decollato · in attesa del segnale",
+        "landed_at": "Atterrato alle {hh}",
+        "waiting": "In attesa del decollo",
+        "in_air": "In volo",
+        "min_to_go": "Circa {m:,.0f} minuti all'arrivo",
+        "hm_to_go": "Circa {h}h {m:02d}m all'arrivo",
+        "last_heard": "{where} · ultimo segnale {m:,.0f} min fa · "
+                      "nessun ricevitore laggiù, è normale",
+        "hold": "ancora {m:,.0f} minuti su questo schermo",
+        "arriving": "arrivo previsto verso le {hh}",
+        "out": "Fuori portata", "atlantic": "Sull'Atlantico",
+        "indian": "Sull'Oceano Indiano", "pacific": "Sul Pacifico",
+        "desert": "Sul deserto", "arctic": "Sull'Artico",
+        "altitude": "Altitudine", "speed": "Velocità",
+        "remaining": "Rimanenti",
+        "climbing": "in salita {v}", "descending": "in discesa {v}",
+        "level": "in quota",
+        "of_total": "di {d} ({p:,.0f}% percorso)",
+        "est_note": "avanzamento stimato dall'orario",
+        "months": ["", "gennaio", "febbraio", "marzo", "aprile", "maggio",
+                   "giugno", "luglio", "agosto", "settembre", "ottobre",
+                   "novembre", "dicembre"],
+    },
+}
+
+
 def render(flight: Flight, *, label: str, shapes, units: Units,
            now: datetime | None = None,
            footnote: str | None = None,
            schedule_line: str | None = None,
-           estimated: dict | None = None) -> Canvas:
+           estimated: dict | None = None,
+           lang: str = "en") -> Canvas:
+    t = T.get(lang, T["en"])
     now = now or datetime.now()
     c = Canvas(background=palette.PAPER)
     blue, red, ink = palette.HEX["blue"], palette.HEX["red"], palette.INK
@@ -47,7 +108,7 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
         accent = palette.HEX["green"]
 
     # -- header -----------------------------------------------------------
-    c.text(90, 148, "in flight" if est else _status_word(flight),
+    c.text(90, 148, t["est_head"] if est else _status_word(flight, t),
            size=34, fill=accent, spacing=3)
     c.line(90, 184, 1110, 184, stroke=accent, width=5)
 
@@ -86,9 +147,9 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
 
     # -- the sentence you read from the sofa ------------------------------
     c.text(90, 900,
-           "Departed · waiting for a live signal" if est
-           else _headline(flight, units, now), size=52, weight="500")
-    detail = None if est else _detail(flight, units, now)
+           t["est_line"] if est
+           else _headline(flight, units, now, t), size=52, weight="500")
+    detail = None if est else _detail(flight, units, now, t)
     if detail:
         c.text(90, 952, detail, size=30, fill=blue)
 
@@ -101,18 +162,17 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
                size=28 if detail else 32, fill=blue)
     c.line(90, 1030, 1110, 1030, width=3)
     pos = flight.position or {}
-    _stat(c, 90, 1120, "Altitude",
+    _stat(c, 90, 1120, t["altitude"],
           units.altitude_str(pos["alt_ft"]) if pos.get("alt_ft") else "—",
-          _vs_note(pos, units))
-    _stat(c, 640, 1120, "Ground speed",
+          _vs_note(pos, units, t))
+    _stat(c, 640, 1120, t["speed"],
           units.speed_str(pos["gs"]) if pos.get("gs") else "—", "")
     remaining = "—"
     if flight.remaining_km is not None:
         remaining = (f"{units.from_km(flight.remaining_km):,.0f} "
                      f"{units.distance_suffix}")
-    _stat(c, 90, 1330, "Remaining", remaining,
-          "progress estimated from the schedule" if est
-          else _route_note(flight, units))
+    _stat(c, 90, 1330, t["remaining"], remaining,
+          t["est_note"] if est else _route_note(flight, units, t))
 
     if footnote:
         # The traveller's next hop, in the stats grid's empty right cell —
@@ -127,87 +187,91 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
     # In the waiting and landed states every render must be byte-identical:
     # the frame blits on hash change, and a footer minute-hand was forcing
     # a full 30-second panel refresh of an otherwise unchanged screen.
+    day = f"{now.day} {t['months'][now.month]} {now.year}"
     if flight.status == AIRBORNE:
-        c.text(90, 1552, f"{now:%d %B %Y} · {now:%H:%M} · {label}",
+        c.text(90, 1552, f"{day} · {now:%H:%M} · {label}",
                size=30, fill=blue)
     else:
-        c.text(90, 1552, f"{now:%d %B %Y} · {label}", size=30, fill=blue)
+        c.text(90, 1552, f"{day} · {label}", size=30, fill=blue)
     return c
 
 
-def _status_word(flight: Flight) -> str:
+def _status_word(flight: Flight, t: dict) -> str:
     return {
-        SCHEDULED: "not yet airborne",
-        AIRBORNE: "in the air",
-        OUT_OF_RANGE: "out of receiver range",
-        LANDED: "landed",
+        SCHEDULED: t["scheduled"],
+        AIRBORNE: t["airborne"],
+        OUT_OF_RANGE: t["out_of_range"],
+        LANDED: t["landed"],
     }.get(flight.status, "tracking")
 
 
-def _headline(flight: Flight, units: Units, now: datetime) -> str:
+def _headline(flight: Flight, units: Units, now: datetime,
+              t: dict) -> str:
     if flight.status == LANDED:
         when = datetime.fromtimestamp(flight.landed_at) if flight.landed_at else now
-        return f"Landed at {when:%H:%M}"
+        return t["landed_at"].format(hh=f"{when:%H:%M}")
     if flight.status == SCHEDULED:
-        return "Waiting for it to take off"
+        return t["waiting"]
     eta = flight.eta_minutes
     if eta is None:
-        return "In the air"
+        return t["in_air"]
     if eta < 60:
-        return f"About {eta:,.0f} minutes to go"
-    return f"About {int(eta // 60)}h {int(eta % 60):02d}m to go"
+        return t["min_to_go"].format(m=eta)
+    return t["hm_to_go"].format(h=int(eta // 60), m=int(eta % 60))
 
 
-def _detail(flight: Flight, units: Units, now: datetime) -> str:
+def _detail(flight: Flight, units: Units, now: datetime,
+            t: dict) -> str:
     if flight.status == OUT_OF_RANGE:
         silent = flight.silent_minutes or 0
-        where = _ocean_hint(flight)
-        return (f"{where} · last heard {silent:,.0f} min ago · "
-                "no receivers out there, this is normal")
+        where = _ocean_hint(flight, t)
+        return t["last_heard"].format(where=where, m=silent)
     if flight.status == LANDED and flight.landed_at:
         gone = (now - datetime.fromtimestamp(flight.landed_at)).total_seconds() / 60
-        return f"showing for another {max(0, 30 - gone):,.0f} minutes"
+        return t["hold"].format(m=max(0, 30 - gone))
     if flight.status == AIRBORNE:
         eta = flight.eta_minutes
         if eta is not None:
-            return f"arriving about {(now + timedelta(minutes=eta)):%H:%M}"
+            return t["arriving"].format(
+                hh=f"{(now + timedelta(minutes=eta)):%H:%M}")
     return ""
 
 
-def _ocean_hint(flight: Flight) -> str:
+def _ocean_hint(flight: Flight, t: dict) -> str:
     """A rough guess at where the gap is, so it reads as an explanation."""
     pos = flight.position
     if not pos:
-        return "Out of range"
+        return t["out"]
     lat, lon = pos["lat"], pos["lon"]
     if -60 < lon < -10 and 20 < lat < 65:
-        return "Over the Atlantic"
+        return t["atlantic"]
     if 40 < lon < 100 and -10 < lat < 35:
-        return "Over the Indian Ocean"
+        return t["indian"]
     if (lon > 140 or lon < -120) and -50 < lat < 55:
-        return "Over the Pacific"
+        return t["pacific"]
     if 10 < lon < 40 and 12 < lat < 32:
-        return "Over the desert"
+        return t["desert"]
     if lat > 62:
-        return "Over the Arctic"
-    return "Out of range"
+        return t["arctic"]
+    return t["out"]
 
 
-def _route_note(flight: Flight, units: Units) -> str:
+def _route_note(flight: Flight, units: Units, t: dict) -> str:
     total = flight.route_km
     if total is None:
         return ""
-    return (f"of {units.from_km(total):,.0f} {units.distance_suffix} "
-            f"({(flight.progress or 0) * 100:,.0f}% flown)")
+    return t["of_total"].format(
+        d=f"{units.from_km(total):,.0f} {units.distance_suffix}",
+        p=(flight.progress or 0) * 100)
 
 
-def _vs_note(pos: dict, units: Units) -> str:
+def _vs_note(pos: dict, units: Units, t: dict) -> str:
     vs = pos.get("vs") or 0
     if vs > 300:
-        return f"climbing {units.climb_str(vs)}"
+        return t["climbing"].format(v=units.climb_str(vs))
     if vs < -300:
-        return f"descending {units.climb_str(vs)}"
-    return "level" if pos.get("alt_ft") else ""
+        return t["descending"].format(v=units.climb_str(vs))
+    return t["level"] if pos.get("alt_ft") else ""
 
 
 def _stat(c: Canvas, x: float, y: float, caption: str, value: str,

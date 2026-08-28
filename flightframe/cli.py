@@ -101,7 +101,9 @@ def _render_once(args, settings) -> int:
                                      schedule_line=getattr(
                                          args, "flight_schedule", None),
                                      estimated=getattr(
-                                         args, "flight_estimated", None))
+                                         args, "flight_estimated", None),
+                                     lang=getattr(args, "flight_lang",
+                                                  "en"))
         elif design == "liveried":
             c = liveried.render(
                 aircraft, label=settings.label, lat=settings.lat, lon=settings.lon,
@@ -332,6 +334,7 @@ def cmd_run_renderer(args) -> int:
                                          settings.user_agent,
                                          provider=app.schedule_provider)
                 _activate_due_flights(registry, tenant, settings)
+                fake.flight_lang = tenant.get("lang") or "en"
                 fake.flight_footnote = _next_flight_line(registry, tenant,
                                                           settings)
                 fake.flight_schedule = _tracked_schedule_line(
