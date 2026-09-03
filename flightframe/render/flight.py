@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from .. import airlines, palette
+from .. import airlines, names, palette
 from ..canvas import Canvas
 from ..tracking import AIRBORNE, LANDED, OUT_OF_RANGE, SCHEDULED, Flight
 from ..units import Units
@@ -123,8 +123,11 @@ def render(flight: Flight, *, label: str, shapes, units: Units,
     c.text(BAR_X0, 560, str(o.get("iata") or "???"), size=112, weight="500", fill=blue)
     c.text(BAR_X1, 560, str(d.get("iata") or "???"), size=112, weight="500",
            fill=blue, anchor="end")
-    c.text(BAR_X0, 610, str(o.get("city") or ""), size=30)
-    c.text(BAR_X1, 610, str(d.get("city") or ""), size=30, anchor="end")
+    # Through the shared normaliser: the tracker's airport record and the
+    # board's schedule rows must agree on what to call a city.
+    c.text(BAR_X0, 610, names.city(o.get("city"), o.get("iata")), size=30)
+    c.text(BAR_X1, 610, names.city(d.get("city"), d.get("iata")), size=30,
+           anchor="end")
 
     # -- progress ---------------------------------------------------------
     progress = flight.progress

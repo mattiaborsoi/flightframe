@@ -407,5 +407,117 @@ class Registry(unittest.TestCase):
         self.assertEqual(list(cli_names), [row[0] for row in web_rows])
 
 
+class Names(unittest.TestCase):
+    """One spelling per city and per aircraft, whichever source answered."""
+
+    def test_city_normalisation(self):
+        from flightframe import names
+        cases = {
+            ("Seoul-si", "GMP"): "Seoul", ("Seoul", "ICN"): "Seoul",
+            ("Taipei City", "TSA"): "Taipei", ("Taoyuan City", "TPE"): "Taipei",
+            (None, "TSA"): "Taipei",              # an override needs no text
+            ("Roissy-en-France", "CDG"): "Paris",
+            ("Bâle/Mulhouse", "BSL"): "Basel",
+            ("Frankfurt-am-Main", None): "Frankfurt",
+            ("Newcastle upon Tyne", None): "Newcastle",
+            ("Kingston upon Hull", None): "Hull",
+            ("Busan Metropolitan City", None): "Busan",
+            ("Seoul Special City", None): "Seoul",
+            ("Sapporo-shi", None): "Sapporo",
+            ("Shanghai Shi", None): "Shanghai",
+            ("Mexico City", None): "Mexico City",
+            ("Ho Chi Minh City", None): "Ho Chi Minh City",
+            ("Thành phố Hồ Chí Minh", None): "Ho Chi Minh City",
+            ("Rio de Janeiro", None): "Rio de Janeiro",
+            ("Santa Cruz de Tenerife", None): "Santa Cruz",
+            ("Paisley, Renfrewshire", None): "Paisley",
+            ("Milano", None): "Milan", ("Genève", "GVA"): "Geneva",
+            ("Bergamo", "BGY"): "Bergamo",        # honest town, not "Milan"
+            ("London", None): "London",
+            (None, None): "", ("", "XXX"): "",
+        }
+        for (raw, iata), want in cases.items():
+            with self.subTest(raw=raw, iata=iata):
+                self.assertEqual(names.city(raw, iata), want)
+
+    def test_same_city_from_two_sources(self):
+        """The bug that motivated the module: the schedule API's municipality
+        for Gimpo ("Seoul-si") and the route database's for Incheon
+        ("Seoul") printed as two different cities on one board."""
+        from flightframe import names
+        self.assertEqual(names.city("Seoul-si", "GMP"),
+                         names.city("Seoul", "ICN"))
+        self.assertEqual(names.city("Taipei City", "TSA"),
+                         names.city("Taipei", "TPE"))
+
+    def test_short_city_bounded(self):
+        from flightframe import names
+        self.assertEqual(names.short_city("Santa Cruz de Tenerife"), "Santa Cruz")
+        self.assertEqual(names.short_city("Frankfurt-am-Main"), "Frankfurt")
+        self.assertTrue(names.short_city("La Rochelle/Île de Ré"))
+        self.assertLessEqual(len(names.short_city("Antananarivo-Renivohitra", 10)), 10)
+
+    def test_aircraft_styling(self):
+        from flightframe import names
+        self.assertEqual(names.aircraft("Airbus A320 NEO"), "Airbus A320neo")
+        self.assertEqual(names.aircraft("Airbus A321 NEO"), "Airbus A321neo")
+        self.assertEqual(names.aircraft("Airbus A330-900 NEO"), "Airbus A330-900")
+        self.assertEqual(names.aircraft("Boeing 787-9 Dreamliner"), "Boeing 787-9")
+        self.assertEqual(names.aircraft("Boeing 737 MAX 8"), "Boeing 737 MAX 8")
+        self.assertEqual(names.aircraft("Boeing 737 MAX8"), "Boeing 737 MAX 8")
+        self.assertEqual(names.aircraft("Airbus A320 (sharklets)"), "Airbus A320")
+        self.assertIsNone(names.aircraft(None))
+
+    def test_type_codes_for_shapes(self):
+        """Schedule model names must reach the right silhouette."""
+        from flightframe.render.next import _type_code
+        for model, code in (("Airbus A320 NEO", "A20N"), ("Embraer 190", "E190"),
+                            ("Embraer 175", "E75L"), ("Embraer E195-E2", "E295"),
+                            ("Boeing 737-8", "B38M"), ("Boeing 737-800", "B738"),
+                            ("Boeing 737-900", "B739"), ("Boeing 737 MAX 8", "B38M"),
+                            ("Airbus A319neo", "A19N"), ("Airbus A321-200", "A321"),
+                            ("Boeing 777-9", "B779"), ("Boeing 777-300ER", "B77W"),
+                            ("Airbus A350-1000", "A35K"), ("Airbus A330-900", "A339"),
+                            ("ATR 72-600", "AT76"), ("Bombardier CRJ-900", "CRJ9"),
+                            ("De Havilland Dash 8-400", "DH8D"), ("A20N", "A20N")):
+            with self.subTest(model=model):
+                self.assertEqual(_type_code(model), code)
+
+    def test_airline_table_knows_new_carriers(self):
+        from flightframe import airlines
+        self.assertEqual(airlines.lookup("CAL").name, "China Airlines")
+        self.assertEqual(airlines.lookup("SZS").body, airlines.lookup("SAS").body)
+        self.assertEqual(airlines.lookup(None, "Unknown Air").body, "white")
+
+    def test_board_prints_one_spelling(self):
+        """A Gimpo row and an Incheon row on the same board both say Seoul,
+        and the API's "A320 NEO" prints as Airbus writes it."""
+        from datetime import date, timedelta
+        from flightframe.render import next as next_design
+        def row(no, days, o, d, oc, dc, craft):
+            return {"flight_no": no, "status": "upcoming",
+                    "date": (date.today() + timedelta(days=days)).isoformat(),
+                    "dep_time": "10:00", "arr_time": "12:00",
+                    "origin": o, "destination": d,
+                    "origin_city": oc, "destination_city": dc,
+                    "aircraft": craft}
+        flights = [row("SK1516", 2, "LHR", "CPH", "London", "Copenhagen",
+                       "Airbus A320 NEO"),
+                   row("SK987", 3, "CPH", "ICN", "Copenhagen", "Seoul",
+                       "Airbus A350-900"),
+                   row("CI261", 5, "GMP", "TSA", "Seoul-si", "Taipei City",
+                       "Boeing 737-800"),
+                   row("CI260", 9, "TSA", "GMP", "Taipei City", "Seoul-si",
+                       "Boeing 737-800")]
+        svg = next_design.render(flights, name="Test", lang="it").svg()
+        self.assertNotIn("Seoul-si", svg)
+        self.assertNotIn("Taipei City", svg)
+        self.assertNotIn("A320 NEO", svg)
+        self.assertIn("Seoul → Taipei", svg)
+        self.assertIn("Taipei → Seoul", svg)
+        self.assertIn("Copenhagen → Seoul", svg)
+        self.assertIn("Airbus A320neo", svg)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from .. import airlines, palette
+from .. import airlines, names, palette
 from ..canvas import Canvas
 
 STRINGS = {
@@ -65,20 +65,6 @@ MONTHS_IT = ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
              "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
 WEEKDAYS_IT = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"]
 
-# The schedule APIs hand back whatever language the airport's country
-# prefers; the board sticks to English names. Small and curated: only
-# cities that have actually appeared wrong, plus their obvious siblings.
-CITY_EN = {
-    "Bâle": "Basel", "Genève": "Geneva", "Zürich": "Zurich",
-    "München": "Munich", "Köln": "Cologne", "Nürnberg": "Nuremberg",
-    "Wien": "Vienna", "Bruxelles": "Brussels", "København": "Copenhagen",
-    "Göteborg": "Gothenburg", "Praha": "Prague", "Warszawa": "Warsaw",
-    "Lisboa": "Lisbon", "Sevilla": "Seville", "Athina": "Athens",
-    "Roma": "Rome", "Milano": "Milan", "Venezia": "Venice",
-    "Napoli": "Naples", "Firenze": "Florence", "Torino": "Turin",
-}
-
-
 def _date_str(d: date, lang: str) -> str:
     """dd/MMM/yyyy — compact enough that queue rows keep a single line."""
     mon = MONTHS_IT[d.month] if lang == "it" else f"{d:%b}"
@@ -93,27 +79,17 @@ def _hero_date_str(d: date, lang: str) -> str:
 
 
 def _place(row: dict, side: str) -> str:
-    """"Venice–VCE" when the city is known, the bare code otherwise."""
+    """"Venice–VCE" when the city is known, the bare code otherwise. The
+    city goes through the shared normaliser, so "Seoul-si" from one source
+    and "Seoul" from another print alike (names.py)."""
     code = (row.get(side) or "···").upper()
-    city = row.get(f"{side}_city")
-    return f"{_short_city(city)}–{code}" if city else code
+    city = names.short_city(row.get(f"{side}_city"), iata=row.get(side))
+    return f"{city}–{code}" if city else code
 
 
-def _short_city(city: str, limit: int = 14) -> str:
-    """Municipality fields carry things like "Paisley, Renfrewshire"."""
-    city = city.split(",")[0].split("/")[0].split(" (")[0].strip()
-    city = CITY_EN.get(city, city)
-    if len(city) <= limit:
-        return city
-    # Cut at a word boundary when one leaves enough behind: "Frankfurt"
-    # reads better than "Frankfurt-a…". (Bounded loop — a lone connective
-    # in the trace renderer's version of this once pinned a CPU for an hour.)
-    head = city[: limit - 1]
-    best = ""
-    for sep in (" ", "-"):
-        if sep in head:
-            best = max(best, head.rsplit(sep, 1)[0].rstrip(" -"), key=len)
-    return best if len(best) >= 4 else head.rstrip() + "…"
+def _short_city(city: str | None, limit: int = 14) -> str:
+    """Kept as the board's local name for the shared shortener."""
+    return names.short_city(city, limit=limit)
 
 
 def _times(row: dict) -> str:
@@ -131,9 +107,9 @@ def _times(row: dict) -> str:
 def _row_route(row: dict, limit: int = 12) -> str:
     """"Copenhagen → Seoul" when cities are known, codes otherwise."""
     def side(key):
-        city = row.get(f"{key}_city")
-        return _short_city(city, limit) if city \
-            else (row.get(key) or "?").upper()
+        city = names.short_city(row.get(f"{key}_city"), limit=limit,
+                                iata=row.get(key))
+        return city or (row.get(key) or "?").upper()
     return f"{side('origin')} → {side('destination')}"
 
 
@@ -176,18 +152,28 @@ def _plane(c: Canvas, x: float, y: float, size: float, fill: str,
 # condensed string, so "A320 NEO" never falls through to plain A320.
 _MODEL_CODES = [
     ("A3501000", "A35K"), ("A350900", "A359"), ("A350", "A359"),
-    ("A330900", "A339"), ("A330300", "A333"), ("A330200", "A332"),
-    ("A380", "A388"), ("A321NEO", "A21N"), ("A320NEO", "A20N"),
+    ("A330900", "A339"), ("A330800", "A338"), ("A330300", "A333"),
+    ("A330200", "A332"), ("A330NEO", "A339"), ("A330", "A333"),
+    ("A340600", "A346"), ("A340", "A343"), ("A380", "A388"),
+    ("A321NEO", "A21N"), ("A321XLR", "A21N"), ("A321LR", "A21N"),
+    ("A320NEO", "A20N"), ("A319NEO", "A19N"),
     ("A321", "A321"), ("A320", "A320"), ("A319", "A319"), ("A318", "A318"),
     ("A220300", "BCS3"), ("A220100", "BCS1"), ("A220", "BCS3"),
-    ("737MAX8", "B38M"), ("737MAX9", "B39M"), ("737MAX", "B38M"),
-    ("737900", "B739"), ("737800", "B738"), ("737700", "B737"),
+    # Boeing's own "737-8" and the airlines' "737 MAX 8" are one aeroplane.
+    ("737MAX10", "B3XM"), ("737MAX9", "B39M"), ("737MAX8", "B38M"),
+    ("737MAX", "B38M"), ("737900", "B739"), ("737800", "B738"),
+    ("737700", "B737"), ("73710", "B3XM"), ("7379", "B39M"), ("7378", "B38M"),
     ("7478", "B748"), ("747400", "B744"), ("747", "B744"),
-    ("777300", "B77W"), ("777200", "B772"), ("777", "B772"),
+    ("777300", "B77W"), ("777200", "B772"), ("7779", "B779"),
+    ("7778", "B778"), ("777", "B772"),
     ("78710", "B78X"), ("7879", "B789"), ("7878", "B788"), ("787", "B789"),
-    ("767", "B763"), ("757", "B752"),
-    ("E195", "E195"), ("E190", "E190"), ("E175", "E75L"),
-    ("ATR72", "AT76"), ("ATR42", "AT45"), ("Q400", "DH8D"),
+    ("767", "B763"), ("757300", "B753"), ("757", "B752"),
+    ("E195E2", "E295"), ("E190E2", "E290"), ("E195", "E195"),
+    ("E190", "E190"), ("E175", "E75L"), ("E170", "E170"),
+    ("CRJ1000", "CRJX"), ("CRJ900", "CRJ9"), ("CRJ700", "CRJ7"),
+    ("CRJ", "CRJ9"), ("ATR72", "AT76"), ("ATR42", "AT45"),
+    ("Q400", "DH8D"), ("DASH8400", "DH8D"), ("DHC8400", "DH8D"),
+    ("DASH8", "DH8D"),
 ]
 _CODE_RE = __import__("re").compile(r"^[A-Z]{1,2}\d{2,3}[A-Z]{0,2}$")
 
@@ -199,6 +185,9 @@ def _type_code(model: str | None) -> str | None:
     if _CODE_RE.match(raw):
         return raw                     # already an ICAO type code
     condensed = "".join(ch for ch in raw if ch.isalnum())
+    # "Embraer 190" carries no "E190" substring; fold the maker's name into
+    # the type prefix it stands for so the E-Jet needles can match.
+    condensed = condensed.replace("EMBRAER", "E").replace("ERJ", "E")
     for needle, code in _MODEL_CODES:
         if needle in condensed:
             return code
@@ -321,7 +310,8 @@ def render(
     # Flight number and aircraft together on one line: the two facts a
     # departure board would pair (§16: grouping — proximity implies
     # relationship), auto-filled from the flight number upstream.
-    craft = (live or {}).get("type_name") or hero.get("aircraft")
+    craft = names.aircraft((live or {}).get("type_name")
+                           or hero.get("aircraft"))
     c.text(90, 630, "  ·  ".join(x for x in (hero["flight_no"], craft) if x),
            size=36)
 
@@ -381,7 +371,7 @@ def render(
                        size=30)
                 sub = "  ·  ".join(x for x in (
                     _times(row) or row.get("dep_time"),
-                    row.get("aircraft")) if x)
+                    names.aircraft(row.get("aircraft"))) if x)
                 if sub:
                     c.text(160, y + 33, sub, size=23, fill=blue)
             else:
