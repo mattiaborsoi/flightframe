@@ -234,6 +234,14 @@ esp_err_t fp_wifi_connect(int timeout_ms)
         }
     }
     if (err == ESP_OK) {
+        /* No modem power-save while awake. The frame deep-sleeps between
+         * polls, so dozing between beacons buys nothing — and some access
+         * points (the family's, Sept 2026) drop the frames they buffer for
+         * a dozing station: every 960 KB poster download stalled after
+         * ~270 KB and timed out, while the small poll requests sailed
+         * through. Fully awake, the radio costs a few mA for the ~30 s the
+         * board is up; a stalled download costs the whole poster. */
+        esp_wifi_set_ps(WIFI_PS_NONE);
         err = esp_wifi_connect();
     }
     if (err != ESP_OK) {
