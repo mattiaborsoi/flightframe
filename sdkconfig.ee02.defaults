@@ -76,3 +76,11 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=n
 CONFIG_FP_PIN_KEY0=5
 CONFIG_FP_PIN_KEY1=3
 CONFIG_FP_PIN_KEY2=2
+
+# No 802.11n frame aggregation. Some home routers (the family's, Sept 2026)
+# negotiate a block-ack session once a download ramps up and then drop the
+# aggregated frames: every 960 KB poster stalled after ~300 KB while the
+# small poll requests never noticed. Throughput matters nothing here — one
+# image per wake — reliability across strangers' routers matters entirely.
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
