@@ -228,6 +228,17 @@ esp_err_t fp_wifi_connect(int timeout_ms)
     }
     memset(&cfg, 0, sizeof(cfg));
     if (err == ESP_OK && !s_wifi_started) {
+        /* Never transmit at 802.11b rates. Under loss the rate control
+         * retreats to 1–2 Mbit/s DSSS, and an access point with a
+         * minimum-bitrate policy (Meraki: 12 Mbit/s by default) silently
+         * discards those frames — each drop pushes the rate lower still,
+         * and the station is blackholed while it believes it is
+         * associated. The family's frame lost every poster exactly this
+         * way about 5 s into each transfer (packet capture, Sept 2026):
+         * its ACKs stopped arriving, and the server's retransmissions
+         * went unanswered for minutes. OFDM only: a 6 Mbit/s floor.
+         * Must precede esp_wifi_start(). */
+        esp_wifi_config_11b_rate(WIFI_IF_STA, true);
         err = esp_wifi_start();
         if (err == ESP_OK) {
             s_wifi_started = true;
