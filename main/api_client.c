@@ -990,43 +990,82 @@ esp_err_t fp_api_download(const char *url, const char *expected_hash,
         !fp_image_hash_valid(expected_hash)) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_http_client_config_t cfg = {
-        .url = url,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 30000,
-    };
-    esp_http_client_handle_t http = esp_http_client_init(&cfg);
-    if (!http) {
-        return ESP_ERR_NO_MEM;
-    }
-    esp_err_t err = esp_http_client_open(http, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(http);
-        return err;
-    }
-    esp_http_client_fetch_headers(http);
-
+    /* Resumable, in attempts. A flaky access point (the family's, Sept
+     * 2026) stalled every 960 KB transfer somewhere between 60 KB and
+     * 400 KB, while the small poll requests sailed through: one long
+     * attempt per wake meant a blank glass for hours. Now a stall costs
+     * ten seconds, the next attempt asks for the rest with a Range header,
+     * and four attempts of partial progress add up to a whole poster. A
+     * server that ignores Range answers 200 with everything: start over. */
     uint32_t got = 0;
-    while (got < FP_IMAGE_BYTES) {
-        int n = esp_http_client_read(http, (char *)buf + got,
-                                     FP_IMAGE_BYTES - got);
-        if (n <= 0) {
-            break;
+    int attempt = 0;
+    while (attempt < FP_DOWNLOAD_ATTEMPTS && got < FP_IMAGE_BYTES) {
+        attempt++;
+        esp_http_client_config_t cfg = {
+            .url = url,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .timeout_ms = FP_DOWNLOAD_READ_TIMEOUT_MS,
+        };
+        esp_http_client_handle_t http = esp_http_client_init(&cfg);
+        if (!http) {
+            return ESP_ERR_NO_MEM;
         }
-        got += n;
-    }
-    /* Anything beyond the expected size is a protocol violation. */
-    char extra;
-    bool oversize = esp_http_client_read(http, &extra, 1) > 0;
-    int status = esp_http_client_get_status_code(http);
-    esp_http_client_close(http);
-    esp_http_client_cleanup(http);
+        char range[40];
+        if (got > 0) {
+            snprintf(range, sizeof(range), "bytes=%lu-", (unsigned long)got);
+            esp_http_client_set_header(http, "Range", range);
+        }
+        esp_err_t err = esp_http_client_open(http, 0);
+        if (err != ESP_OK) {
+            esp_http_client_cleanup(http);
+            ESP_LOGW(TAG, "download attempt %d: open failed (%s)", attempt,
+                     esp_err_to_name(err));
+            continue;
+        }
+        esp_http_client_fetch_headers(http);
+        int status = esp_http_client_get_status_code(http);
+        if (got > 0 && status == 200) {
+            got = 0;                  /* Range ignored: the whole image follows */
+        }
+        bool ok = (got == 0) ? status == 200 : status == 206;
+        uint32_t before = got;
+        if (ok) {
+            while (got < FP_IMAGE_BYTES) {
+                int n = esp_http_client_read(http, (char *)buf + got,
+                                             FP_IMAGE_BYTES - got);
+                if (n <= 0) {
+                    break;
+                }
+                got += n;
+            }
+        }
+        /* Anything beyond the expected size is a protocol violation. */
+        bool oversize = false;
+        if (ok && got >= FP_IMAGE_BYTES) {
+            char extra;
+            oversize = esp_http_client_read(http, &extra, 1) > 0;
+        }
+        esp_http_client_close(http);
+        esp_http_client_cleanup(http);
 
-    if (status != 200 || got != FP_IMAGE_BYTES || oversize) {
-        ESP_LOGW(TAG, "download bad: HTTP %d, %lu bytes%s", status,
-                 (unsigned long)got, oversize ? " (oversize)" : "");
+        if (!ok || oversize) {
+            ESP_LOGW(TAG, "download bad: HTTP %d%s", status,
+                     oversize ? " (oversize)" : "");
+            return ESP_FAIL;          /* a rotated poster (404) is final */
+        }
+        if (got < FP_IMAGE_BYTES) {
+            ESP_LOGW(TAG, "download attempt %d stalled at %lu bytes (+%lu)",
+                     attempt, (unsigned long)got,
+                     (unsigned long)(got - before));
+        }
+    }
+    if (got != FP_IMAGE_BYTES) {
+        ESP_LOGW(TAG, "download incomplete: %lu bytes after %d attempts",
+                 (unsigned long)got, attempt);
         return ESP_FAIL;
     }
+    ESP_LOGI(TAG, "download complete in %d attempt%s", attempt,
+             attempt == 1 ? "" : "s");
 
     unsigned char digest[32];
     mbedtls_sha256(buf, FP_IMAGE_BYTES, digest, 0);

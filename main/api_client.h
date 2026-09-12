@@ -10,6 +10,8 @@
 #include "target_contract.h"
 
 #define FP_IMAGE_BYTES 960000u        /* 1200*1600 / 2 — PROTOCOL.md §1 */
+#define FP_DOWNLOAD_ATTEMPTS 4          /* resumable, see fp_api_download */
+#define FP_DOWNLOAD_READ_TIMEOUT_MS 10000
 
 typedef struct {
     char image_url[768];              /* presigned URLs are long */
