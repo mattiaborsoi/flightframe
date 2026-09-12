@@ -393,6 +393,20 @@ MAX_BODY = 64 * 1024      # public internet: nothing here needs a bigger POST
 SESSION_COOKIE = "ff_session"
 
 
+
+def _range_start(header: str | None, total: int) -> int | None:
+    """"bytes=123-" -> 123; None for no/unsupported Range header."""
+    if not header or not header.startswith("bytes="):
+        return None
+    spec = header[6:].strip()
+    if not spec.endswith("-") or spec.count("-") != 1:
+        return None
+    try:
+        start = int(spec[:-1])
+    except ValueError:
+        return None
+    return start if 0 <= start else None
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "flightframe"
     timeout = 30
@@ -585,7 +599,30 @@ class Handler(BaseHTTPRequestHandler):
             # is exactly right — it will pick up the new hash next time.
             self._send(b"unknown image", "text/plain", 404)
             return
-        self._send(data, "application/octet-stream")
+        # Resumable: a frame on a flaky access point (the family's stalled
+        # every transfer after 60–400 KB) asks for the rest with a Range
+        # header instead of starting the 960 KB over. Only the open-ended
+        # "bytes=START-" form the firmware sends is honoured; anything
+        # else gets the whole image, which is always a correct answer.
+        start = _range_start(self.headers.get("Range"), len(data))
+        if start is None:
+            self.send_response(200)
+            self.send_header("Accept-Ranges", "bytes")
+        elif start >= len(data):
+            self.send_response(416)
+            self.send_header("Content-Range", f"bytes */{len(data)}")
+            data = b""
+        else:
+            self.send_response(206)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Range",
+                             f"bytes {start}-{len(data) - 1}/{len(data)}")
+            data = data[start:]
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     # -- POST -------------------------------------------------------------
 

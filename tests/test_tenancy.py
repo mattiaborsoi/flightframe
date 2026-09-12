@@ -169,6 +169,30 @@ class Tenancy(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=10) as r:
             self.assertEqual(len(r.read()), 960_000)
 
+        # Resumable download: a frame whose transfer stalled asks for the
+        # rest with "bytes=START-" and gets a 206 with exactly the tail;
+        # a start past the end is 416; other Range forms fall back to 200.
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/device/v1/img/{digest_1}.bin",
+            headers={"Range": "bytes=900000-"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            self.assertEqual(r.status, 206)
+            self.assertEqual(r.headers["Content-Range"],
+                             "bytes 900000-959999/960000")
+            self.assertEqual(len(r.read()), 60_000)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/device/v1/img/{digest_1}.bin",
+            headers={"Range": "bytes=960000-"})
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 416)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/device/v1/img/{digest_1}.bin",
+            headers={"Range": "bytes=0-99"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(len(r.read()), 960_000)
+
     def test_disabled_tenant_gets_503_not_401(self):
         status, body, _ = _call(
             self.port, "/device/v1/setup", "POST",
