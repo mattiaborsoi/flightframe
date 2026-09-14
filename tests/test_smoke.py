@@ -565,5 +565,51 @@ class Callsigns(unittest.TestCase):
         self.assertEqual(asked, ["BA0607", "BA607"])   # exact first, then bare
 
 
+class RegistrationRung(unittest.TestCase):
+    """A tail is rostered all day; it identifies OUR leg only from its own
+    departure onwards."""
+
+    def _flight(self, dep_epoch, hexcode=None):
+        from flightframe.tracking import Flight
+        return Flight(
+            query="BA0607", callsign="BAW607", callsign_iata="BA607",
+            airline="British Airways",
+            origin={"iata": "VCE", "lat": 45.505, "lon": 12.351},
+            destination={"iata": "LHR", "lat": 51.4706, "lon": -0.4619},
+            started_at=0.0, registration="G-TTNL", dep_epoch=dep_epoch,
+            hex=hexcode)
+
+    def test_rejects_the_tail_on_its_previous_leg(self):
+        """G-TTNL, due out of Venice at 17:05, was cruising over the
+        Pyrenees as BAW450 from Barcelona; the frame showed the Venice
+        flight airborne twenty minutes before it pushed back."""
+        import time
+        from flightframe.tracking import _reg_plausible
+        pyrenees = {"lat": 42.7337, "lon": 1.9356, "alt_baro": 39000}
+        f = self._flight(dep_epoch=time.time() + 20 * 60)   # not yet departed
+        self.assertIsNone(_reg_plausible(pyrenees, f))
+
+    def test_accepts_the_aircraft_once_it_could_have_flown_there(self):
+        import time
+        from flightframe.tracking import _reg_plausible
+        over_france = {"lat": 46.5, "lon": 5.0, "alt_baro": 36000}
+        f = self._flight(dep_epoch=time.time() - 55 * 60)   # 55 min out
+        self.assertIsNotNone(_reg_plausible(over_france, f))
+
+    def test_locked_hex_settles_the_question(self):
+        import time
+        from flightframe.tracking import _reg_plausible
+        far = {"lat": 42.7337, "lon": 1.9356}
+        f = self._flight(dep_epoch=time.time() + 20 * 60, hexcode="4008f3")
+        self.assertIsNotNone(_reg_plausible(far, f))
+
+    def test_near_origin_is_fine_at_departure(self):
+        import time
+        from flightframe.tracking import _reg_plausible
+        on_stand = {"lat": 45.51, "lon": 12.34, "alt_baro": 0}
+        f = self._flight(dep_epoch=time.time())
+        self.assertIsNotNone(_reg_plausible(on_stand, f))
+
+
 if __name__ == "__main__":
     unittest.main()

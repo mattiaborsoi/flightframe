@@ -165,6 +165,26 @@ HUNT_AFTER_S = 55 * 60            # a heavy delay still gets the window
 HUNT_RADIUS_NM = 45
 
 
+
+def _reg_plausible(seen: dict, flight) -> dict | None:
+    """Is this really our leg, or the tail's previous one?
+
+    Acquiring by tail is only safe once the aircraft could actually have
+    flown here: an aeroplane cannot be farther from its departure airport
+    than the time since departure allows. Once the hex is locked the
+    question is settled and this check steps aside.
+    """
+    if flight.hex or not flight.dep_epoch or not flight.origin:
+        return seen
+    lat, lon = seen.get("lat"), seen.get("lon")
+    o = flight.origin
+    if lat is None or lon is None or o.get("lat") is None:
+        return seen
+    minutes = max(0.0, (time.time() - flight.dep_epoch) / 60.0)
+    reach_nm = HUNT_RADIUS_NM + minutes * 9.0      # ~540 kt, generous
+    away_nm = sources.haversine_nm(o["lat"], o["lon"], lat, lon)
+    return seen if away_nm <= reach_nm else None
+
 def hunt_pick(candidates: list[dict], bearing_deg: float,
               airline_icao: str | None,
               type_hint: str | None) -> dict | None:
@@ -362,16 +382,25 @@ class Tracker:
                     flight.registration = pick["registration"]
                 if pick.get("ident_icao"):
                     flight.callsign = pick["ident_icao"]
-        if seen is None and flight.registration:
+        if (seen is None and flight.registration
+                and (flight.dep_epoch is None
+                     or time.time() >= flight.dep_epoch - HUNT_BEFORE_S)):
             # Airlines often fly a number under an operational callsign the
             # route database cannot predict (BAW588 flew unseen to Milan;
             # THY1986 to Istanbul likewise). The tail is unambiguous when
             # the schedule discloses it, so hunt by registration next.
+            #
+            # But ONLY from its own departure onwards. A tail is rostered
+            # across a whole day, so before this leg pushes back it is
+            # somewhere else entirely: G-TTNL, due to fly Venice-Heathrow
+            # at 17:05, was found mid-Pyrenees at FL390 flying BAW450 from
+            # Barcelona, and the frame proudly showed the Venice flight
+            # airborne twenty minutes before it left the gate.
             raw = sources._get(
                 f"https://api.adsb.lol/v2/reg/{flight.registration}",
                 self.user_agent, attempts=1)
-            if raw and raw.get("ac"):
-                seen = raw["ac"][0]
+            cand = (raw or {}).get("ac") or []
+            seen = _reg_plausible(cand[0], flight) if cand else None
         if (seen is None and flight.hex is None and flight.origin
                 and flight.destination and flight.dep_epoch
                 and -HUNT_BEFORE_S < time.time() - flight.dep_epoch
