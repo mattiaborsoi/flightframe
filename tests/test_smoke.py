@@ -611,5 +611,29 @@ class RegistrationRung(unittest.TestCase):
         self.assertIsNotNone(_reg_plausible(on_stand, f))
 
 
+class ScheduleAirports(unittest.TestCase):
+    def test_aerodatabox_captures_airport_coordinates(self):
+        """The keyless route table is static and drifts a season behind
+        (it still flew BA607 out of Pisa when the schedule said Venice);
+        the dated schedule knows which field the aeroplane leaves from."""
+        from unittest.mock import patch
+        from flightframe import schedule
+        leg = [{
+            "departure": {"airport": {"iata": "VCE", "municipalityName": "Venice",
+                                      "location": {"lat": 45.5053, "lon": 12.3519}},
+                          "scheduledTime": {"local": "2026-09-14 17:05+02:00"}},
+            "arrival": {"airport": {"iata": "LHR", "municipalityName": "London",
+                                    "location": {"lat": 51.4706, "lon": -0.461941}},
+                        "scheduledTime": {"local": "2026-09-14 18:25+01:00"}},
+        }]
+        with patch.object(schedule.sources, "_get", lambda *a, **k: leg):
+            out = schedule.scheduled_details("BA0607", "2026-09-14", "k", "ua",
+                                             provider="aerodatabox")
+        self.assertAlmostEqual(out["origin_lat"], 45.5053, places=4)
+        self.assertAlmostEqual(out["origin_lon"], 12.3519, places=4)
+        self.assertAlmostEqual(out["destination_lat"], 51.4706, places=4)
+        self.assertEqual(out["origin"], "VCE")
+
+
 if __name__ == "__main__":
     unittest.main()

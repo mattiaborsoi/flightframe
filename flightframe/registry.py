@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS upcoming_flights (
   delay_min INTEGER,                 -- revised vs scheduled, minutes
   registration TEXT,                 -- tail assigned to the flight
   origin_city TEXT, destination_city TEXT,  -- from the schedule API
+  origin_lat REAL, origin_lon REAL,         -- the dated schedule's airports
+  destination_lat REAL, destination_lon REAL,
   arr_day_offset INTEGER,            -- 1 = lands the day after departure
   dep_offset_min INTEGER, arr_offset_min INTEGER,  -- airport UTC offsets,
                                      -- per-date so DST is already baked in
@@ -112,6 +114,14 @@ _MIGRATIONS = {
     7: ["ALTER TABLE upcoming_flights ADD COLUMN dep_offset_min INTEGER",
         "ALTER TABLE upcoming_flights ADD COLUMN arr_offset_min INTEGER"],
     8: ["ALTER TABLE upcoming_flights ADD COLUMN airline_status TEXT"],
+    # The route database's airports can be a season out of date (it still
+    # had BA607 leaving Pisa when the schedule said Venice), and the
+    # tracker measured the flight from the wrong city. The dated schedule
+    # knows exactly which field the aeroplane leaves from.
+    9: ["ALTER TABLE upcoming_flights ADD COLUMN origin_lat REAL",
+        "ALTER TABLE upcoming_flights ADD COLUMN origin_lon REAL",
+        "ALTER TABLE upcoming_flights ADD COLUMN destination_lat REAL",
+        "ALTER TABLE upcoming_flights ADD COLUMN destination_lon REAL"],
 }
 
 TENANT_FIELDS = ("id", "name", "status", "lat", "lon", "label", "radius_nm",
@@ -408,7 +418,8 @@ class Registry:
                  "arr_time", "dep_terminal", "dep_gate", "delay_min",
                  "registration", "origin_city", "destination_city",
                  "arr_day_offset", "dep_offset_min", "arr_offset_min",
-                 "airline_status")
+                 "airline_status", "origin_lat", "origin_lon",
+                 "destination_lat", "destination_lon")
                 if fields.get(k)}
         sets = ", ".join(f"{k}=?" for k in keep) + (", " if keep else "")             + "last_refreshed=?"
         with self._db() as db:

@@ -159,6 +159,14 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
                 # correction keeps "Milan–MXP" from collapsing to a bare code.
                 if airport.get("municipalityName"):
                     out[f"{key}_city"] = airport["municipalityName"]
+                # Coordinates too: the keyless route database is a static
+                # table and can name last season's airport (BA607: Pisa
+                # when today's schedule says Venice), which had the
+                # tracker measuring progress from 250 km away.
+                loc = airport.get("location") or {}
+                if loc.get("lat") is not None and loc.get("lon") is not None:
+                    out[f"{key}_lat"] = float(loc["lat"])
+                    out[f"{key}_lon"] = float(loc["lon"])
         if dep.get("terminal"):
             out["dep_terminal"] = str(dep["terminal"])
         if dep.get("gate"):

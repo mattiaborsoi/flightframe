@@ -440,6 +440,15 @@ def _activate_due_flights(registry, tenant, settings) -> None:
                         if row.get(f"{side}_city"):
                             ap["city"] = row[f"{side}_city"]
                         changed = True
+                    # And its real position. Labelling the route
+                    # database's Pisa "VCE" left the poster measuring a
+                    # Venice flight from Tuscany: 1,186 km of progress
+                    # against a 1,151 km flight.
+                    lat, lon = row.get(f"{side}_lat"), row.get(f"{side}_lon")
+                    if lat is not None and lon is not None \
+                            and (ap.get("lat"), ap.get("lon")) != (lat, lon):
+                        ap["lat"], ap["lon"] = lat, lon
+                        changed = True
                 changed |= _sync_hints(flight, row)
                 if changed:
                     tracker.save(flight)
