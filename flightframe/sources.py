@@ -187,6 +187,21 @@ def _maybe_float(v: Any) -> float | None:
         return None
 
 
+
+def unpad_callsign(cs: str) -> str | None:
+    """"BA0607" -> "BA607"; None when there is no padding to strip.
+
+    Only fires on a real leading zero after a 2-character (IATA) or
+    3-character (ICAO) airline code, so "SK987" and "F92538" are left
+    exactly as they are.
+    """
+    cs = (cs or "").strip().upper()
+    for n in (2, 3):
+        head, tail = cs[:n], cs[n:]
+        if len(tail) > 1 and tail[0] == "0" and tail.isdigit():
+            return head + tail.lstrip("0")
+    return None
+
 class Enricher:
     """adsbdb lookups, cached on disk forever.
 
@@ -241,6 +256,19 @@ class Enricher:
         return payload
 
     def route(self, callsign: str) -> dict[str, Any] | None:
+        route = self._route_exact(callsign)
+        if route is not None:
+            return route
+        # Tickets and airline apps zero-pad the number ("BA0607"); the route
+        # database stores it bare ("BA607") and answers "unknown callsign"
+        # to the padded form. A padded number therefore resolved its
+        # airports from the schedule API but could never be TRACKED: the
+        # tracker needs this lookup for the ICAO callsign and the airport
+        # coordinates, and it failed silently on every pass.
+        bare = unpad_callsign(callsign)
+        return self._route_exact(bare) if bare else None
+
+    def _route_exact(self, callsign: str) -> dict[str, Any] | None:
         payload = self._lookup(f"cs:{callsign}", f"{ADSBDB}/callsign/{callsign}")
         try:
             return payload["response"]["flightroute"]

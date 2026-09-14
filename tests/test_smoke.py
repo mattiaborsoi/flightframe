@@ -519,5 +519,51 @@ class Names(unittest.TestCase):
         self.assertIn("Airbus A320neo", svg)
 
 
+class Callsigns(unittest.TestCase):
+    """A zero-padded flight number must still reach the route database."""
+
+    def test_unpad_only_strips_real_padding(self):
+        from flightframe.sources import unpad_callsign
+        self.assertEqual(unpad_callsign("BA0607"), "BA607")
+        self.assertEqual(unpad_callsign("BAW0607"), "BAW607")
+        self.assertEqual(unpad_callsign("U20123"), "U2123")
+        for untouched in ("SK987", "F92538", "TK1986", "BA994", ""):
+            with self.subTest(cs=untouched):
+                self.assertIsNone(unpad_callsign(untouched))
+
+    def test_route_falls_back_to_unpadded(self):
+        """BA0607 sat "upcoming" through its whole takeover window: the
+        route database answers "unknown callsign" to the padded number, so
+        Tracker.start() returned None on every renderer pass, silently."""
+        from unittest.mock import patch
+        from tempfile import TemporaryDirectory
+        from flightframe import sources
+        answers = {
+            "BA0607": {"response": "unknown callsign"},
+            "BA607": {"response": {"flightroute": {
+                "callsign_icao": "BAW607", "callsign_iata": "BA607",
+                "airline": {"name": "British Airways", "icao": "BAW"},
+                "origin": {"iata_code": "VCE", "latitude": 45.5,
+                           "longitude": 12.35, "municipality": "Venice"},
+                "destination": {"iata_code": "LHR", "latitude": 51.47,
+                                "longitude": -0.46, "municipality": "London"}}}},
+        }
+        asked = []
+
+        def fake_get(url, *a, **k):
+            cs = url.rsplit("/", 1)[-1]
+            asked.append(cs)
+            return answers.get(cs)
+
+        with TemporaryDirectory() as tmp:
+            with patch.object(sources, "_get", fake_get):
+                enricher = sources.Enricher(Path(tmp), "test/0.1")
+                route = enricher.route("BA0607")
+        self.assertIsNotNone(route)
+        self.assertEqual(route["callsign_icao"], "BAW607")
+        self.assertEqual(route["origin"]["iata_code"], "VCE")
+        self.assertEqual(asked, ["BA0607", "BA607"])   # exact first, then bare
+
+
 if __name__ == "__main__":
     unittest.main()
