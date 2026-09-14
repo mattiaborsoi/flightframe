@@ -429,27 +429,11 @@ def _activate_due_flights(registry, tenant, settings) -> None:
             if flight is not None:
                 # The schedule API outranks the static route database on
                 # where this dated flight is actually going (BA588's route
-                # entry says Linate; today's schedule says Malpensa). Keep
-                # the database's coordinates, show the schedule's airports.
-                changed = False
-                for side in ("origin", "destination"):
-                    code = (row.get(side) or "").upper()
-                    ap = getattr(flight, side)
-                    if code and len(code) == 3 and ap.get("iata") != code:
-                        ap["iata"] = code
-                        if row.get(f"{side}_city"):
-                            ap["city"] = row[f"{side}_city"]
-                        changed = True
-                    # And its real position. Labelling the route
-                    # database's Pisa "VCE" left the poster measuring a
-                    # Venice flight from Tuscany: 1,186 km of progress
-                    # against a 1,151 km flight.
-                    lat, lon = row.get(f"{side}_lat"), row.get(f"{side}_lon")
-                    if lat is not None and lon is not None \
-                            and (ap.get("lat"), ap.get("lon")) != (lat, lon):
-                        ap["lat"], ap["lon"] = lat, lon
-                        changed = True
-                changed |= _sync_hints(flight, row)
+                # entry says Linate; today's schedule says Malpensa), and
+                # on where it leaves from: labelling the route database's
+                # Pisa "VCE" left the poster measuring a Venice flight
+                # from Tuscany, 1,186 km against an actual 1,151.
+                changed = _sync_hints(flight, row)
                 if changed:
                     tracker.save(flight)
                 tracker.poll()
@@ -553,6 +537,36 @@ def _sync_hints(flight, row) -> bool:
     if epoch and flight.dep_epoch != epoch:
         flight.dep_epoch = epoch
         changed = True
+    return _sync_airports(flight, row) or changed
+
+
+def _sync_airports(flight, row) -> bool:
+    """Let the dated schedule's airports win over the route database's.
+
+    The keyless route table is static and drifts a season behind (it
+    still flew BA607 out of Pisa while the schedule said Venice), so it
+    can name the wrong airport AND the wrong coordinates. Runs on every
+    pass, not only at takeover: a schedule refresh mid-flight must reach
+    a tracker that is already running.
+    """
+    changed = False
+    for side in ("origin", "destination"):
+        ap = getattr(flight, side)
+        if not ap:
+            continue
+        code = (row.get(side) or "").upper()
+        if code and len(code) == 3 and ap.get("iata") != code:
+            ap["iata"] = code
+            changed = True
+        city = row.get(f"{side}_city")
+        if city and ap.get("city") != city:
+            ap["city"] = city
+            changed = True
+        lat, lon = row.get(f"{side}_lat"), row.get(f"{side}_lon")
+        if lat is not None and lon is not None \
+                and (ap.get("lat"), ap.get("lon")) != (lat, lon):
+            ap["lat"], ap["lon"] = lat, lon
+            changed = True
     return changed
 
 

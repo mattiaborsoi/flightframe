@@ -223,6 +223,7 @@ def hunt_pick(candidates: list[dict], bearing_deg: float,
 FA_URL = "https://aeroapi.flightaware.com/aeroapi/flights/"
 FA_MONTHLY_BUDGET = 100
 FA_PER_FLIGHT = 6
+FA_WITH_REG = 1           # the schedule already named a tail: confirm once
 FA_SPACING_S = 600
 
 
@@ -361,11 +362,18 @@ class Tracker:
                 self.user_agent, attempts=2)
             if raw and raw.get("ac"):
                 seen = raw["ac"][0]
+        # The schedule's tail is a ROSTER, published hours ahead; aircraft
+        # get swapped. One paid confirmation at flight time catches the
+        # swap and the real callsign, so spend it only when ADS-B has not
+        # already found the aeroplane by itself — which it usually has.
+        # With a tail in hand that is worth exactly one call; with nothing
+        # to go on, the old allowance stands.
+        fa_cap = FA_PER_FLIGHT if not flight.registration else FA_WITH_REG
         if (seen is None and self.fa_key and flight.hex is None
-                and not flight.registration and flight.dep_epoch
+                and flight.dep_epoch
                 and -HUNT_BEFORE_S < time.time() - flight.dep_epoch
                 < HUNT_AFTER_S
-                and flight.fa_tries < FA_PER_FLIGHT
+                and flight.fa_tries < fa_cap
                 and (flight.fa_last is None
                      or time.time() - flight.fa_last > FA_SPACING_S)
                 and _fa_budget_spend(self.cache_dir)):
@@ -378,8 +386,12 @@ class Tracker:
                                headers={"x-apikey": self.fa_key})
             pick = _fa_pick((raw or {}).get("flights") or [], time.time())
             if pick is not None:
-                if pick.get("registration"):
-                    flight.registration = pick["registration"]
+                reg = pick.get("registration")
+                if reg and reg != flight.registration:
+                    if flight.registration:
+                        print(f"tracking {flight.query}: aircraft swapped, "
+                              f"{flight.registration} -> {reg}", flush=True)
+                    flight.registration = reg
                 if pick.get("ident_icao"):
                     flight.callsign = pick["ident_icao"]
         if (seen is None and flight.registration
