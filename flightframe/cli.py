@@ -525,7 +525,12 @@ def _sync_hints(flight, row) -> bool:
     that opens the origin-airport hunt window."""
     from .render.next import _type_code
     changed = False
-    if row.get("registration") and flight.registration != row["registration"]:
+    # The schedule's tail is a ROSTER. Once a transponder or FlightAware
+    # has said which airframe is actually flying this leg, the roster is
+    # the stale one: it re-asserted the rostered G-TTNL over the observed
+    # G-TTSE on the very next pass, quietly undoing the swap detection.
+    if (row.get("registration") and not flight.reg_observed
+            and flight.registration != row["registration"]):
         flight.registration = row["registration"]
         changed = True
     hint = _type_code(row.get("aircraft"))

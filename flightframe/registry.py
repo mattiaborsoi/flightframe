@@ -413,6 +413,14 @@ class Registry:
     def flight_refresh(self, flight_id: int, fields: dict,
                        now: float) -> None:
         """Overwrite schedule-sourced fields; the airline's data wins."""
+        # `k in fields`, not `fields.get(k)`: zero is a value. A +00:00
+        # airport (Heathrow, Dublin, Lisbon all winter) yields a
+        # dep_offset_min of exactly 0, and a truthiness test threw it
+        # away, leaving those flights with no departure instant at all —
+        # which silently shut the origin hunt, the FlightAware rung and
+        # the tail's reachability check. It also lets the provider
+        # WITHDRAW a fact: a released gate or a cancelled delay arrives
+        # as an explicit None and is cleared instead of printing for ever.
         keep = {k: fields[k] for k in
                 ("dep_time", "origin", "destination", "aircraft",
                  "arr_time", "dep_terminal", "dep_gate", "delay_min",
@@ -420,7 +428,7 @@ class Registry:
                  "arr_day_offset", "dep_offset_min", "arr_offset_min",
                  "airline_status", "origin_lat", "origin_lon",
                  "destination_lat", "destination_lon")
-                if fields.get(k)}
+                if k in fields}
         sets = ", ".join(f"{k}=?" for k in keep) + (", " if keep else "")             + "last_refreshed=?"
         with self._db() as db:
             db.execute(f"UPDATE upcoming_flights SET {sets} WHERE id=?",

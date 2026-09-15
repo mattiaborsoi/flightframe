@@ -12,10 +12,12 @@ are cached on disk indefinitely and only positions are re-fetched.
 from __future__ import annotations
 
 import json
+import re
 import math
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -188,6 +190,9 @@ def _maybe_float(v: Any) -> float | None:
 
 
 
+_CALLSIGN_RE = re.compile(r"^[A-Z0-9]{2,8}$")
+
+
 def unpad_callsign(cs: str) -> str | None:
     """"BA0607" -> "BA607"; None when there is no padding to strip.
 
@@ -256,6 +261,13 @@ class Enricher:
         return payload
 
     def route(self, callsign: str) -> dict[str, Any] | None:
+        # A transponder broadcasts whatever the crew typed, and some of it
+        # is not a callsign: "BAW671 0" (a real one, seen overhead) has a
+        # space in the middle, which urllib refuses to put in a URL. The
+        # exception escaped into the renderer and cost that tenant its
+        # whole pass — six posters — sixty times in a day.
+        if not _CALLSIGN_RE.match((callsign or "").strip().upper()):
+            return None
         route = self._route_exact(callsign)
         if route is not None:
             return route
@@ -269,14 +281,16 @@ class Enricher:
         return self._route_exact(bare) if bare else None
 
     def _route_exact(self, callsign: str) -> dict[str, Any] | None:
-        payload = self._lookup(f"cs:{callsign}", f"{ADSBDB}/callsign/{callsign}")
+        quoted = urllib.parse.quote(callsign.strip().upper(), safe="")
+        payload = self._lookup(f"cs:{callsign}", f"{ADSBDB}/callsign/{quoted}")
         try:
             return payload["response"]["flightroute"]
         except (TypeError, KeyError):
             return None
 
     def airframe(self, hexcode: str) -> dict[str, Any] | None:
-        payload = self._lookup(f"hex:{hexcode}", f"{ADSBDB}/aircraft/{hexcode}")
+        quoted = urllib.parse.quote((hexcode or "").strip(), safe="")
+        payload = self._lookup(f"hex:{hexcode}", f"{ADSBDB}/aircraft/{quoted}")
         try:
             return payload["response"]["aircraft"]
         except (TypeError, KeyError):

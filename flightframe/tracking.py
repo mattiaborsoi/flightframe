@@ -67,6 +67,10 @@ class Flight:
     airline_icao: str | None = None   # callsign prefix, e.g. THY
     type_hint: str | None = None      # expected ICAO type, e.g. A359
     dep_epoch: float | None = None    # scheduled departure, absolute
+    # True once a transponder or FlightAware has told us which airframe is
+    # ACTUALLY flying this leg. The schedule's tail is only a roster,
+    # published hours ahead, and must never overwrite an observation.
+    reg_observed: bool = False
     fa_tries: int = 0                 # AeroAPI identification attempts
     fa_last: float | None = None
 
@@ -169,10 +173,17 @@ HUNT_RADIUS_NM = 45
 def _reg_plausible(seen: dict, flight) -> dict | None:
     """Is this really our leg, or the tail's previous one?
 
-    Acquiring by tail is only safe once the aircraft could actually have
-    flown here: an aeroplane cannot be farther from its departure airport
-    than the time since departure allows. Once the hex is locked the
-    question is settled and this check steps aside.
+    Two ways the roster's aeroplane can be the wrong aeroplane, and a
+    test for each. It may not have flown our leg yet, in which case it is
+    impossibly far from our departure airport; or it may be the inbound
+    that becomes our aircraft, in which case it is flying TOWARDS that
+    airport rather than away from it. Once the hex is locked the question
+    is settled and both tests step aside.
+
+    Distance is measured from the earliest plausible pushback, not from
+    the timetable: flights do leave early, and clamping at the scheduled
+    time allowed the aircraft barely any distance at all, so a genuinely
+    early departure was rejected as implausible.
     """
     if flight.hex or not flight.dep_epoch or not flight.origin:
         return seen
@@ -180,10 +191,20 @@ def _reg_plausible(seen: dict, flight) -> dict | None:
     o = flight.origin
     if lat is None or lon is None or o.get("lat") is None:
         return seen
-    minutes = max(0.0, (time.time() - flight.dep_epoch) / 60.0)
+    earliest = flight.dep_epoch - EARLY_DEPARTURE_S
+    minutes = max(0.0, (time.time() - earliest) / 60.0)
     reach_nm = HUNT_RADIUS_NM + minutes * 9.0      # ~540 kt, generous
     away_nm = sources.haversine_nm(o["lat"], o["lon"], lat, lon)
-    return seen if away_nm <= reach_nm else None
+    if away_nm > reach_nm:
+        return None
+    track = seen.get("track")
+    if track is not None and away_nm > HUNT_RADIUS_NM:
+        # Heading back to where we are meant to leave from: that is the
+        # inbound rotation, not our departure.
+        to_origin = sources.bearing(lat, lon, o["lat"], o["lon"])
+        if abs((track - to_origin + 180) % 360 - 180) < 60:
+            return None
+    return seen
 
 def hunt_pick(candidates: list[dict], bearing_deg: float,
               airline_icao: str | None,
@@ -224,6 +245,7 @@ FA_URL = "https://aeroapi.flightaware.com/aeroapi/flights/"
 FA_MONTHLY_BUDGET = 100
 FA_PER_FLIGHT = 6
 FA_WITH_REG = 1           # the schedule already named a tail: confirm once
+EARLY_DEPARTURE_S = 30 * 60   # how early a scheduled flight can plausibly go
 FA_SPACING_S = 600
 
 
@@ -387,16 +409,17 @@ class Tracker:
             pick = _fa_pick((raw or {}).get("flights") or [], time.time())
             if pick is not None:
                 reg = pick.get("registration")
-                if reg and reg != flight.registration:
-                    if flight.registration:
+                if reg:
+                    if flight.registration and reg != flight.registration:
                         print(f"tracking {flight.query}: aircraft swapped, "
                               f"{flight.registration} -> {reg}", flush=True)
                     flight.registration = reg
+                    flight.reg_observed = True
                 if pick.get("ident_icao"):
                     flight.callsign = pick["ident_icao"]
         if (seen is None and flight.registration
                 and (flight.dep_epoch is None
-                     or time.time() >= flight.dep_epoch - HUNT_BEFORE_S)):
+                     or time.time() >= flight.dep_epoch - EARLY_DEPARTURE_S)):
             # Airlines often fly a number under an operational callsign the
             # route database cannot predict (BAW588 flew unseen to Milan;
             # THY1986 to Istanbul likewise). The tail is unambiguous when
@@ -442,7 +465,10 @@ class Tracker:
             alt = seen.get("alt_baro")
             on_ground = not isinstance(alt, (int, float))
             flight.last_seen = now
-            flight.registration = (seen.get("r") or "").strip() or flight.registration
+            observed_reg = (seen.get("r") or "").strip()
+            if observed_reg:
+                flight.registration = observed_reg
+                flight.reg_observed = True
             flight.type = (seen.get("t") or "").strip() or flight.type
             if seen.get("lat") is not None:
                 flight.position = {

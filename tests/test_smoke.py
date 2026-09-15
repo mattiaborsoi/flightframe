@@ -635,5 +635,125 @@ class ScheduleAirports(unittest.TestCase):
         self.assertEqual(out["origin"], "VCE")
 
 
+class RefreshAccuracy(unittest.TestCase):
+    """The five accuracy repairs of 15 Sep 2026."""
+
+    def test_zero_offset_survives_the_refresh(self):
+        """Heathrow in winter is +00:00. A truthiness test threw that away
+        and left the flight with no departure instant at all."""
+        from tempfile import TemporaryDirectory
+        from flightframe.registry import Registry
+        with TemporaryDirectory() as tmp:
+            reg = Registry(Path(tmp) / "app.sqlite")
+            reg.tenant_add("t1", "T", 51.5, -0.1, "L")
+            fid = reg.flight_add("t1", "BA758", "2026-12-19")
+            reg.flight_refresh(fid, {"dep_time": "13:40", "dep_offset_min": 0,
+                                     "delay_min": 0}, 1000.0)
+            row = reg.flights_for("t1")[0]
+        self.assertEqual(row["dep_offset_min"], 0)
+        self.assertEqual(row["delay_min"], 0)
+
+    def test_withdrawn_gate_is_cleared(self):
+        from tempfile import TemporaryDirectory
+        from flightframe.registry import Registry
+        with TemporaryDirectory() as tmp:
+            reg = Registry(Path(tmp) / "app.sqlite")
+            reg.tenant_add("t1", "T", 51.5, -0.1, "L")
+            fid = reg.flight_add("t1", "BA758", "2026-12-19")
+            reg.flight_refresh(fid, {"dep_gate": "A10", "delay_min": 25}, 1000.0)
+            self.assertEqual(reg.flights_for("t1")[0]["dep_gate"], "A10")
+            reg.flight_refresh(fid, {"dep_gate": None, "delay_min": None}, 2000.0)
+            row = reg.flights_for("t1")[0]
+        self.assertIsNone(row["dep_gate"])
+        self.assertIsNone(row["delay_min"])
+
+    def test_empty_answer_never_retries_faster_than_the_cadence(self):
+        """An empty answer used to backdate a flat eleven hours, which on
+        a departure day metered at twenty minutes meant a retry on every
+        renderer pass: ten times the call volume, feeding a rate limit."""
+        from unittest.mock import patch
+        from datetime import date, datetime, timezone, timedelta
+        from flightframe import schedule
+        today = date.today().isoformat()
+        dep = datetime.fromisoformat(f"{today} 17:05").replace(
+            tzinfo=timezone(timedelta(minutes=120))).timestamp()
+
+        class FakeReg:
+            def __init__(self, row): self.row = row
+            def flights_for(self, tid, **kw): return [dict(self.row)]
+            def flight_refresh(self, fid, fields, now):
+                self.row["last_refreshed"] = now
+
+        reg = FakeReg({"id": 1, "flight_no": "BA0607", "date": today,
+                       "origin": "VCE", "destination": "LHR",
+                       "dep_time": "17:05", "dep_offset_min": 120,
+                       "last_refreshed": dep - 12 * 3600})
+        calls = []
+        now = [dep - 6 * 3600]
+        with patch.object(schedule, "scheduled_details",
+                          lambda *a, **k: calls.append(now[0]) or {}), \
+             patch.object(schedule.time, "sleep", lambda s: None):
+            while now[0] < dep + 2 * 3600:
+                schedule.refresh_due(reg, "t", "k", "/tmp", "ua", now=now[0],
+                                     provider="aerodatabox")
+                now[0] += 180
+        self.assertLess(len(calls), 30, f"{len(calls)} calls in 8h is a storm")
+        gaps = [b - a for a, b in zip(calls, calls[1:])]
+        self.assertTrue(all(g >= 1180 for g in gaps),
+                        f"retried faster than the 20-minute cadence: {gaps}")
+
+    def test_roster_never_overwrites_an_observed_tail(self):
+        """FlightAware found G-TTSE; the rostered G-TTNL came straight back
+        on the next pass and undid the swap detection."""
+        from flightframe.cli import _sync_hints
+
+        class F:
+            registration = "G-TTSE"; reg_observed = True
+            type_hint = "A20N"; dep_epoch = None
+            origin = None; destination = None
+        f = F()
+        _sync_hints(f, {"registration": "G-TTNL", "aircraft": "Airbus A320 NEO",
+                        "date": "2026-09-14", "dep_time": "17:05",
+                        "dep_offset_min": 120})
+        self.assertEqual(f.registration, "G-TTSE")
+
+        g = F(); g.reg_observed = False; g.registration = None
+        _sync_hints(g, {"registration": "G-TTNL", "date": "2026-09-14"})
+        self.assertEqual(g.registration, "G-TTNL")   # roster still seeds it
+
+    def test_a_broadcast_callsign_with_a_space_cannot_reach_a_url(self):
+        """'BAW671 0' really flew overhead and cost the frame 60 render
+        passes in a day."""
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from flightframe import sources
+        calls = []
+        with TemporaryDirectory() as tmp:
+            with patch.object(sources, "_get",
+                              lambda url, *a, **k: calls.append(url)):
+                enr = sources.Enricher(Path(tmp), "ua")
+                self.assertIsNone(enr.route("BAW671 0"))
+        self.assertEqual(calls, [], "a malformed callsign must not be fetched")
+
+    def test_an_early_departure_is_not_rejected(self):
+        import time
+        from flightframe.tracking import _reg_plausible
+
+        class F:
+            hex = None; registration = "G-TTSE"
+            origin = {"iata": "VCE", "lat": 45.505, "lon": 12.352}
+            destination = {"iata": "LHR", "lat": 51.47, "lon": -0.46}
+            dep_epoch = time.time() + 10 * 60      # 10 min before schedule
+        # 20 minutes out of Venice, heading north-west for London.
+        early = {"lat": 46.6, "lon": 10.4, "track": 300}
+        self.assertIsNotNone(_reg_plausible(early, F()))
+        # The same tail on its INBOUND leg, still heading for Venice.
+        inbound = {"lat": 46.6, "lon": 10.4, "track": 120}
+        self.assertIsNone(_reg_plausible(inbound, F()))
+        # And the previous leg, impossibly far away over the Pyrenees.
+        pyrenees = {"lat": 42.73, "lon": 1.94, "track": 320}
+        self.assertIsNone(_reg_plausible(pyrenees, F()))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -167,13 +167,13 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
                 if loc.get("lat") is not None and loc.get("lon") is not None:
                     out[f"{key}_lat"] = float(loc["lat"])
                     out[f"{key}_lon"] = float(loc["lon"])
-        if dep.get("terminal"):
-            out["dep_terminal"] = str(dep["terminal"])
-        if dep.get("gate"):
-            out["dep_gate"] = str(dep["gate"])
-        delay = _minutes_between(sched, revised)
-        if delay is not None:
-            out["delay_min"] = delay
+        # Volatile facts are reported as None when the airline withdraws
+        # them, so the board can stop showing a gate that was released or
+        # a delay that was cancelled. Only ever reached on a leg that
+        # parsed: an API error returns {} and changes nothing.
+        out["dep_terminal"] = str(dep["terminal"]) if dep.get("terminal") else None
+        out["dep_gate"] = str(dep["gate"]) if dep.get("gate") else None
+        out["delay_min"] = _minutes_between(sched, revised)
         if leg.get("status"):
             out["airline_status"] = str(leg["status"])
         aircraft = leg.get("aircraft") or {}
@@ -238,7 +238,9 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
             # EXISTS months out — one fill on add (retried monthly, so a
             # not-yet-published schedule still lands eventually) gives the
             # queue its cities and times for pennies of quota.
-            if now - (row.get("last_refreshed") or 0) < 30 * 86400:
+            cadence_s = 30 * 86400
+            retry_s = 24 * 3600
+            if now - (row.get("last_refreshed") or 0) < cadence_s:
                 continue
         else:
             # Gates and delays only publish in the final hours before
@@ -261,6 +263,9 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
                         cadence_s = 20 * 60
                 except ValueError:
                     pass
+            # Retrying an empty answer must never be FASTER than the
+            # normal cadence, only sooner than a long one.
+            retry_s = min(cadence_s, 3600)
             if now - (row.get("last_refreshed") or 0) < cadence_s:
                 continue
         fields = {}
@@ -276,15 +281,15 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
                                       api_key, user_agent,
                                       provider=provider)
         fields.update(looked_up)
-        # An empty answer is a rate limit or an unpublished schedule, not a
-        # fact worth remembering for a whole cadence period: backdate the
-        # stamp so the next retry lands in about a day instead.
-        if looked_up:
-            stamp = now
-        elif days_out > REFRESH_DAYS:
-            stamp = now - 30 * 86400 + 24 * 3600   # monthly cadence, retry in ~1d
-        else:
-            stamp = now - (REFRESH_HOURS - 1) * 3600   # 12h cadence, retry in ~1h
+        # An empty answer is a rate limit or an unpublished schedule, not
+        # a fact worth remembering for a whole cadence period: backdate
+        # the stamp so the next attempt lands sooner. The backdate is a
+        # FRACTION OF THIS ROW'S CADENCE. A flat eleven hours assumed the
+        # twelve-hour cadence and, on a departure day metered at twenty
+        # minutes, left every row permanently overdue: an empty answer
+        # then retried on every renderer pass, ten times the normal call
+        # volume, and a rate limit fed itself.
+        stamp = now if looked_up else now - cadence_s + retry_s
         registry.flight_refresh(row["id"], fields, stamp)
         done += 1
     return done
