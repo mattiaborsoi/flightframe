@@ -180,12 +180,7 @@ SETTINGS_SNIPPET = """
         <button type="button" id="s_locate">Use my location</button>
       </div>
     </div>
-    <div class="field">
-      <label for="s_radius">Radius (nautical miles)</label>
-      <span class="tip">The posters' field of view around home. 25 suits a
-        city; bigger shows distant cruisers too. 5&#8211;250.</span>
-      <input id="s_radius" type="number" required min="5" max="250" step="1">
-    </div>
+    
     <div class="field">
       <label for="s_refresh">Refresh every (minutes)</label>
       <span class="tip">How often the frame wakes for a new poster. Shorter
@@ -224,7 +219,7 @@ async function loadSettings() {
   const r = await fetch("/api/settings"); if (!r.ok) return;
   const s = await r.json();
   s_label.value = s.label; s_lat.value = s.lat; s_lon.value = s.lon;
-  s_radius.value = s.radius_nm; s_units.value = s.units;
+  s_units.value = s.units;
   s_refresh.value = s.refresh_minutes; s_from.value = s.awake_from;
   s_until.value = s.awake_until; s_tz.value = s.tz;
   try {
@@ -247,7 +242,7 @@ document.getElementById("s_save").addEventListener("click", async () => {
     if (!el.checkValidity()) { s_fail("check the highlighted field"); el.focus(); return; }
   if (s_from.value >= s_until.value) { s_fail("awake window must start before it ends"); return; }
   const body = {label: s_label.value.trim(), lat: parseFloat(s_lat.value),
-    lon: parseFloat(s_lon.value), radius_nm: parseFloat(s_radius.value),
+    lon: parseFloat(s_lon.value),
     units: s_units.value, refresh_minutes: parseInt(s_refresh.value, 10),
     awake_from: s_from.value, awake_until: s_until.value, tz: s_tz.value.trim()};
   const r = await fetch("/api/settings", {method:"POST",

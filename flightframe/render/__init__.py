@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import flight, liveried, next as next_flight, portrait, rose, section  # noqa: F401
+from . import flight, next as next_flight  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -17,22 +17,19 @@ class Design:
     name: str
     title: str
     blurb: str
-    needs_history: bool = False
     on_demand: bool = False        # rendered only when there is something to show
 
 
+# The four designs that drew the sky overhead — destination rose,
+# cross-section, single plane, liveried grid — were removed in Sept 2026.
+# Nobody was looking at them, and between them they were the only reason
+# the service watched live traffic at all: a collector polling adsb.lol
+# round the clock, a position database per tenant, and the pruning to keep
+# it from growing. What remains is a frame about the flights you are
+# actually taking.
 DESIGNS: tuple[Design, ...] = (
     Design("flight", "Tracked flight",
            "One flight followed to its destination", on_demand=True),
-    Design("rose", "Destination rose",
-           "One spoke per destination, at its true bearing and distance",
-           needs_history=True),
-    Design("section", "Cross-section",
-           "Distance from home against altitude, right now"),
-    Design("portrait", "Single plane",
-           "One aircraft, chosen by a rotating superlative"),
-    Design("liveried", "Liveried grid",
-           "Four aircraft on a flooded background"),
     Design("next", "Flying next",
            "Where you are flying next: countdown, route, aircraft"),
 )

@@ -18,3 +18,4 @@ __pycache__/
 
 # Compiled firmware images are build artifacts, never committed.
 tools/provision/fw/
+docs/*.bin

@@ -1,17 +1,16 @@
 # flightframe
 
-A cloud service that draws the sky above your house on a six-colour e-ink
-frame. Aircraft positions come from [adsb.lol](https://adsb.lol), routes from
+A cloud service that puts the flights you are actually taking on a
+six-colour e-ink frame. Schedules come from a flight-data API, live
+positions from [adsb.lol](https://adsb.lol) and routes from
 [adsbdb](https://adsbdb.com); the server renders 1200×1600 posters, and a
 battery-powered ESP32 frame wakes every few minutes, downloads the latest
 one, and goes back to sleep.
 
 | | | |
 |:---:|:---:|:---:|
-| ![Single plane](docs/portrait.png) | ![Liveried grid](docs/liveried.png) | ![Flying next](docs/next.png) |
-| **Single plane** — one aircraft, chosen by a rotating superlative | **Liveried grid** — the sky right now, in airline colours | **Flying next** — a travel board for a frame in someone else's house |
-| ![Destination rose](docs/rose.png) | ![Charge](docs/charge.png) | |
-| **Destination rose** — where everyone overhead was going | **Low battery** — a dying frame explains itself | |
+| ![Flying next](docs/next.png) | ![Tracked flight](docs/flight.png) | ![Charge](docs/charge.png) |
+| **Flying next** — a travel board, countdown and all, for a frame in someone else's house | **Tracked flight** — the one in the air right now, followed to the gate | **Low battery** — a dying frame explains itself |
 
 Multi-tenant: each household gets an isolated dashboard (location, poster
 design, refresh cadence, awake window, timezone, flight tracking) behind an
@@ -22,7 +21,7 @@ tracking while the flight is in the air.
 
 ## Layout
 
-    flightframe/       server: collector, renderers, web dashboard, device API
+    flightframe/       server: renderers, web dashboard, device API
     tools/provision/   one-time BLE provisioning of a frame (Wi-Fi + server)
     tools/simulate_frame.py   protocol conformance check, no hardware needed
     caddy/             TLS termination for cloud deployment
@@ -37,8 +36,7 @@ tracking while the flight is in the air.
     .venv/bin/python -m flightframe.cli user add t1 you@example.com
     .venv/bin/python -m flightframe.cli serve --host 127.0.0.1
 
-Then in two more terminals: `run-collector --loop 60` and
-`run-renderer --loop 180`.
+Then in another terminal: `run-renderer --loop 180`.
 
 ## Run (production)
 

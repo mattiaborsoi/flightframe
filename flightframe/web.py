@@ -530,7 +530,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/settings":
             tenant = user["tenant"]
             self._json({k: tenant[k] for k in
-                        ("label", "lat", "lon", "radius_nm", "units",
+                        ("label", "lat", "lon", "units",
                          "refresh_minutes", "awake_from", "awake_until", "tz")})
         elif path.startswith("/img/"):
             self._image(user, Path(path).name)
@@ -785,7 +785,7 @@ class Handler(BaseHTTPRequestHandler):
         import re
         fields: dict = {}
         try:
-            for key in ("lat", "lon", "radius_nm"):
+            for key in ("lat", "lon"):
                 if key in body:
                     fields[key] = float(body[key])
                     if fields[key] != fields[key]:      # NaN
@@ -794,8 +794,6 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("latitude must be between -90 and 90")
             if "lon" in fields and not (-180 <= fields["lon"] <= 180):
                 raise ValueError("longitude must be between -180 and 180")
-            if "radius_nm" in fields and not (5 <= fields["radius_nm"] <= 250):
-                raise ValueError("radius must be 5–250 nm")
             if "refresh_minutes" in body:
                 v = int(body["refresh_minutes"])
                 if not (3 <= v <= 360):
@@ -870,7 +868,7 @@ class Handler(BaseHTTPRequestHandler):
             }
 
         return {"designs": designs, "label": user["tenant"]["label"],
-                "radius": round(settings.radius_nm), "tracking": tracking,
+                "tracking": tracking,
                 "selected": selection.current(),
                 "showing": selection.effective(tracking is not None),
                 "selectable": selection.selectable()}

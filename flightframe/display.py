@@ -1,10 +1,6 @@
 """Which poster the frame is currently showing.
 
-Deliberately a single stored choice rather than a rotation. The designs are not
-equally good at all hours — the rose has
-almost nothing in it before the morning bank — so cycling blindly guarantees
-the frame is regularly showing a poster at its worst. Picking one and changing
-it when you feel like it always shows something worth looking at.
+Deliberately a single stored choice rather than a rotation.
 
 A tracked flight overrides the choice entirely and reverts when it expires,
 which is why `effective()` exists and callers should use it rather than
@@ -18,7 +14,7 @@ from pathlib import Path
 
 from .render import BY_NAME, NAMES
 
-DEFAULT = "portrait"
+DEFAULT = "next"
 FLIGHT = "flight"
 
 

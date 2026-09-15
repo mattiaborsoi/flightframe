@@ -51,14 +51,10 @@ class Settings:
     lat: float
     lon: float
     label: str
-    radius_nm: float
     refresh_minutes: int
     awake_from: time
     awake_until: time
-    trace_hours: int
     units_name: str
-    min_altitude_ft: float
-    section_radius_km: float
     user_agent: str
     data_dir: Path
     out_dir: Path
@@ -93,14 +89,10 @@ def load(env_file: Path | None = None) -> Settings:
         lat=float(g("HOME_LAT", DEFAULT_LAT)),
         lon=float(g("HOME_LON", DEFAULT_LON)),
         label=g("HOME_LABEL", DEFAULT_LABEL),
-        radius_nm=float(g("RADIUS_NM", 25)),
         refresh_minutes=int(g("REFRESH_MINUTES", 15)),
         awake_from=_hhmm(g("AWAKE_FROM", ""), time(7, 0)),
         awake_until=_hhmm(g("AWAKE_UNTIL", ""), time(23, 0)),
-        trace_hours=int(g("TRACE_HOURS", 12)),
         units_name=g("UNITS", "metric"),
-        min_altitude_ft=float(g("MIN_ALTITUDE_FT", 1000)),
-        section_radius_km=float(g("SECTION_RADIUS_KM", 25)),
         user_agent=g("USER_AGENT", "flightframe/0.1"),
         data_dir=data_dir,
         out_dir=out_dir,
@@ -168,14 +160,10 @@ def for_tenant(app: AppConfig, tenant: dict) -> Settings:
         lat=float(tenant["lat"]),
         lon=float(tenant["lon"]),
         label=tenant["label"],
-        radius_nm=float(tenant["radius_nm"]),
         refresh_minutes=int(tenant["refresh_minutes"]),
         awake_from=_hhmm(tenant["awake_from"], time(7, 0)),
         awake_until=_hhmm(tenant["awake_until"], time(23, 0)),
-        trace_hours=int(tenant["trace_hours"]),
         units_name=tenant["units"],
-        min_altitude_ft=float(tenant["min_altitude_ft"]),
-        section_radius_km=float(tenant["section_radius_km"]),
         user_agent=app.user_agent,
         data_dir=app.tenant_data(tenant["id"]),
         out_dir=app.tenant_out(tenant["id"]),

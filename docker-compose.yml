@@ -14,16 +14,10 @@ services:
 
   # The only adsb.lol position poller: one fetch per distinct tenant location
   # group per cycle, snapshots for the renderer, rows into per-tenant history.
-  collector:
-    <<: *common
-    container_name: flightframe-collector
-    command: ["run-collector", "--loop", "60", "--prune", "${PRUNE_HOURS:-12}"]
-    volumes:
-      - ./data:/data
-      - ./cache:/cache
-
-  # Renders every active tenant from the collector's snapshots. Never calls
-  # adsb.lol itself.
+  # Renders every active tenant. The collector that swept the sky around
+  # each home location once a minute was removed with the four designs
+  # that drew it; what is left queries one aircraft at a time, only while
+  # a flight is actually being tracked.
   renderer:
     <<: *common
     container_name: flightframe-renderer

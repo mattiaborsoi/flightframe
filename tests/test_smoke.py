@@ -17,8 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from flightframe import canvas, config, palette, units
-from flightframe.render import DESIGNS, flight, liveried, portrait, rose, section
-from flightframe.sources import Aircraft
+from flightframe.render import DESIGNS, flight
 from flightframe.tracking import AIRBORNE, LANDED, OUT_OF_RANGE, SCHEDULED, Flight
 
 M = units.METRIC
@@ -33,23 +32,6 @@ class NullShapes:
     def resolve(self, _code):
         return "Unidentified"
 
-
-def _aircraft(n: int = 12) -> list[Aircraft]:
-    out = []
-    for i in range(n):
-        out.append(Aircraft(
-            hex=f"{i:06x}", callsign=f"TST{i:03d}", type="A20N",
-            registration=f"G-TST{i}", lat=51.5 + i * 0.02, lon=-0.1 + i * 0.03,
-            altitude_ft=1_200 + i * 3_100, ground_speed_kt=180 + i * 20,
-            track_deg=(i * 29) % 360, vertical_fpm=(i % 3 - 1) * 1_400,
-            distance_nm=i * 1.9, bearing_deg=(i * 47) % 360, seen_at=time.time(),
-        ))
-        out[-1].airline = "Test Air"
-        out[-1].airline_icao = "BAW"
-        out[-1].origin = {"iata": "DUB", "city": "Dublin", "lat": 53.4, "lon": -6.2}
-        out[-1].destination = {"iata": "JFK", "city": "New York",
-                               "lat": 40.6, "lon": -73.8}
-    return out
 
 
 def _flight(status: str) -> Flight:
@@ -66,7 +48,6 @@ def _flight(status: str) -> Flight:
     if status == LANDED:
         f.landed_at = time.time() - 300
     return f
-
 
 class PanelFormat(unittest.TestCase):
     def test_pack_roundtrip_and_verify(self):
@@ -140,34 +121,6 @@ class Renderers(unittest.TestCase):
             data = written["bin"].read_bytes()
             self.assertEqual(len(data), palette.PACKED_BYTES, name)
             palette.verify(data)
-
-    def test_section(self):
-        self._check(section.render(_aircraft(), label="Test", radius_km=25,
-                                   units=M), "section")
-
-    def test_section_empty_sky(self):
-        self._check(section.render([], label="Test", radius_km=25, units=M), "empty")
-
-    def test_liveried(self):
-        self._check(liveried.render(_aircraft(), label="Test", lat=51.5, lon=-0.1,
-                                    shapes=NullShapes(), units=M), "liveried")
-
-    def test_portrait(self):
-        picked = portrait.choose(_aircraft(), "furthest")
-        self.assertIsNotNone(picked)
-        ac, heading = picked
-        self._check(portrait.render(ac, heading, label="Test",
-                                    shapes=NullShapes(), units=M), "portrait")
-
-    def test_rose(self):
-        points = [{"city": f"City {i}", "iata": "XXX",
-                   "km": 800 + i * 1_400, "bearing": i * 31 % 360}
-                  for i in range(14)]
-        self._check(rose.render(points, label="Test", units=M), "rose")
-
-    def test_rose_with_nothing_far_enough(self):
-        self._check(rose.render([{"city": "Near", "iata": "AAA", "km": 100,
-                                  "bearing": 10}], label="Test", units=M), "rose")
 
     def test_next_board_both_languages(self):
         from datetime import date, timedelta
@@ -346,19 +299,20 @@ class DisplaySelection(unittest.TestCase):
         from flightframe.display import Selection
         with TemporaryDirectory() as tmp:
             sel = Selection(Path(tmp))
-            self.assertEqual(sel.current(), "portrait")       # sane default
-            self.assertTrue(sel.set("rose")[0])
-            self.assertEqual(sel.current(), "rose")
+            self.assertEqual(sel.current(), "next")           # sane default
+            self.assertTrue(sel.set("next")[0])
+            self.assertEqual(sel.current(), "next")
             self.assertFalse(sel.set("nonsense")[0])
+            self.assertFalse(sel.set("rose")[0])              # removed Sept 2026
             self.assertFalse(sel.set("flight")[0])            # tracker owns this
-            self.assertEqual(sel.current(), "rose")           # unchanged by failures
+            self.assertEqual(sel.current(), "next")           # unchanged by failures
 
     def test_tracked_flight_overrides(self):
         from flightframe.display import Selection
         with TemporaryDirectory() as tmp:
             sel = Selection(Path(tmp))
-            sel.set("section")
-            self.assertEqual(sel.effective(tracking_active=False), "section")
+            sel.set("next")
+            self.assertEqual(sel.effective(tracking_active=False), "next")
             self.assertEqual(sel.effective(tracking_active=True), "flight")
 
     def test_corrupt_file_falls_back(self):
@@ -366,7 +320,7 @@ class DisplaySelection(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             sel = Selection(Path(tmp))
             sel.path.write_text("{ not json")
-            self.assertEqual(sel.current(), "portrait")
+            self.assertEqual(sel.current(), "next")
 
 
 class DeviceTokens(unittest.TestCase):

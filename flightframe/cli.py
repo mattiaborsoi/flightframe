@@ -1,10 +1,8 @@
-"""Command line: collect data, render designs, inspect coverage.
+"""Command line: render designs, follow a flight, run the service.
 
-    python -m flightframe.cli render liveried
-    python -m flightframe.cli render all --dither
-    python -m flightframe.cli collect --loop 60
+    python -m flightframe.cli render all
+    python -m flightframe.cli track BA117
     python -m flightframe.cli serve
-    python -m flightframe.cli coverage
 """
 from __future__ import annotations
 
@@ -17,38 +15,17 @@ from . import canvas as canvas_mod
 from .display import Selection
 from .registry import Registry
 from .tracking import Tracker
-from . import config, palette, shapes as shapes_mod, sources
+from . import config, shapes as shapes_mod, sources
 from .render import BY_NAME, NAMES as DESIGN_NAMES
 from .render import flight as flight_design
-from .render import liveried, portrait, rose, section
 from .web import serve
-from .store import Store
 
 DESIGNS = DESIGN_NAMES
 
 
-def _context(settings, *, enrich_limit: int | None = None, live: bool = True):
-    # Enrich the whole snapshot by default. Labelling only the nearest dozen
-    # left most of the cross-section showing callsigns, which is precisely the
-    # information the redesign was meant to remove. adsbdb results are cached
-    # on disk forever, so this is expensive exactly once.
-    lib = shapes_mod.Library(settings.cache_dir, settings.user_agent)
-    aircraft: list[sources.Aircraft] | None = []
-    if live:
-        # Prefer the collector's snapshot: one adsb.lol poll serves every
-        # consumer. Fall back to a direct fetch so single-process dev use
-        # (render without a collector running) keeps working.
-        key = sources.lockey(settings.lat, settings.lon, settings.radius_nm)
-        aircraft = sources.read_snapshot(settings.cache_dir, key,
-                                         settings.min_altitude_ft)
-        if aircraft is None:
-            aircraft = sources.fetch(settings.lat, settings.lon,
-                                     settings.radius_nm, settings.user_agent,
-                                     settings.min_altitude_ft)
-        if aircraft:
-            sources.Enricher(settings.cache_dir, settings.user_agent).apply(
-                aircraft, limit=enrich_limit)
-    return lib, aircraft
+def _shapes(settings):
+    """The airframe outline library, shared by every remaining design."""
+    return shapes_mod.Library(settings.cache_dir, settings.user_agent)
 
 
 def cmd_render(args, settings) -> int:
@@ -66,150 +43,37 @@ def cmd_render(args, settings) -> int:
 
 
 def _render_once(args, settings) -> int:
+    """Draw the tracked-flight poster, if a flight is being tracked.
+
+    The travel board and the charge poster are rendered by their own
+    callers; this used to dispatch six designs, four of which drew the sky
+    overhead and are gone.
+    """
     designs = DESIGNS if args.design == "all" else (args.design,)
-    needs_live = bool(designs)
-    lib, aircraft = _context(settings, live=needs_live)
-
-    if needs_live and aircraft is None:
-        # The fetch failed rather than finding an empty sky. Leave the existing
-        # posters alone: a stale render is far better than one that confidently
-        # reports nothing overhead.
-        print("adsb.lol unreachable — keeping the previous renders",
-              file=sys.stderr, flush=True)
-        designs = tuple(d for d in designs if BY_NAME[d].needs_history)
-        if not designs:
-            return 1
-        aircraft = []
-
+    if "flight" not in designs:
+        return 0
+    lib = _shapes(settings)
     now = datetime.now()
     tracker = Tracker(settings.data_dir, settings.cache_dir, settings.user_agent)
-    for design in designs:
-        c = None
-        if design == "flight":
-            tracked = tracker.poll()
-            if tracked is None:
-                # Remove the stale poster. Otherwise the last tracked flight
-                # lingers in the gallery for as long as the files sit there —
-                # a six-day-old "LH404, 6h to go" card long after it landed.
-                for suffix in (".png", ".bin", ".svg"):
-                    (settings.out_dir / f"flight{suffix}").unlink(missing_ok=True)
-                continue
-            c = flight_design.render(tracked, label=settings.label, shapes=lib,
-                                     units=settings.units, now=now,
-                                     footnote=getattr(args, "flight_footnote",
-                                                      None),
-                                     schedule_line=getattr(
-                                         args, "flight_schedule", None),
-                                     estimated=getattr(
-                                         args, "flight_estimated", None),
-                                     lang=getattr(args, "flight_lang",
-                                                  "en"))
-        elif design == "liveried":
-            c = liveried.render(
-                aircraft, label=settings.label, lat=settings.lat, lon=settings.lon,
-                shapes=lib, units=settings.units, background=args.background,
-                edition=args.edition, show_coords=args.coords, now=now)
-        elif design == "section":
-            c = section.render(aircraft, label=settings.label,
-                               radius_km=args.section_km or settings.section_radius_km,
-                               units=settings.units,
-                               floor_ft=settings.min_altitude_ft, now=now)
-        elif design == "portrait":
-            picked = portrait.choose(aircraft, args.mode)
-            if not picked:
-                print("portrait: nothing overhead to draw", file=sys.stderr)
-                continue
-            ac, heading = picked
-            c = portrait.render(ac, heading, label=settings.label, shapes=lib,
-                                units=settings.units, now=now)
-        elif design == "rose":
-            store = Store(settings.data_dir / "positions.sqlite")
-            meta = store.track_meta(settings.trace_hours)
-            lo, hi = store.span(settings.trace_hours)
-            store.close()
-            points = _rose_points(_destinations(meta, settings))
-            if not points:
-                print("rose: no routed traffic in the window yet", file=sys.stderr)
-                continue
-            c = rose.render(
-                points, label=settings.label, units=settings.units,
-                since=datetime.fromtimestamp(lo) if lo else None,
-                until=datetime.fromtimestamp(hi) if hi else None, now=now)
-
-        if c is None:
-            continue
-        written = canvas_mod.render(c, settings.out_dir, design,
-                                    dither=args.dither, keep_svg=args.svg)
-        print(f"{design:9} -> {written['png'].name}  "
-              f"({written['bin'].stat().st_size:,} bytes packed)", flush=True)
-    return 0
-
-
-def _destinations(meta, settings) -> dict[str, dict]:
-    """hex -> destination airport, for the rose's spokes.
-
-    Enrichment is cached on disk forever, so this is one lookup per callsign
-    ever seen rather than one per render.
-    """
-    enricher = sources.Enricher(settings.cache_dir, settings.user_agent)
-    out: dict[str, dict] = {}
-    for hexcode, (callsign, _type) in meta.items():
-        if not callsign:
-            continue
-        route = enricher.route(callsign)
-        dest = (route or {}).get("destination") or {}
-        city = dest.get("municipality") or dest.get("iata_code")
-        if not city:
-            continue
-        entry = {"city": city, "iata": dest.get("iata_code")}
-        try:
-            dlat, dlon = float(dest["latitude"]), float(dest["longitude"])
-        except (KeyError, TypeError, ValueError):
-            out[hexcode] = entry
-            continue
-        entry["km"] = sources.haversine_nm(settings.lat, settings.lon, dlat, dlon) * 1.852
-        entry["bearing"] = sources.bearing(settings.lat, settings.lon, dlat, dlon)
-        out[hexcode] = entry
-    enricher.save()
-    return out
-
-
-def _rose_points(destinations: dict[str, dict]) -> list[dict]:
-    """One entry per distinct destination, nearest duplicate wins."""
-    by_city: dict[str, dict] = {}
-    for entry in destinations.values():
-        if "km" not in entry or entry["km"] < 60:      # same-city hops, and home
-            continue
-        by_city.setdefault(entry["city"], entry)
-    return list(by_city.values())
-
-
-def cmd_collect(args, settings) -> int:
-    store = Store(settings.data_dir / "positions.sqlite")
-    try:
-        while True:
-            found = sources.fetch(settings.lat, settings.lon, settings.radius_nm,
-                                  settings.user_agent, settings.min_altitude_ft)
-            if found is None:
-                print(f"{datetime.now():%H:%M:%S}  adsb.lol unreachable, skipping",
-                      flush=True)
-                if not args.loop:
-                    return 1
-                time.sleep(args.loop)
-                continue
-            n = store.record(found)
-            print(f"{datetime.now():%H:%M:%S}  {n:3} aircraft  "
-                  f"({store.count(settings.trace_hours)} distinct in "
-                  f"{settings.trace_hours}h)", flush=True)
-            if args.prune:
-                store.prune(args.prune)
-            if not args.loop:
-                return 0
-            time.sleep(args.loop)
-    except KeyboardInterrupt:
+    tracked = tracker.poll()
+    if tracked is None:
+        # Remove the stale poster. Otherwise the last tracked flight
+        # lingers in the gallery for as long as the files sit there —
+        # a six-day-old "LH404, 6h to go" card long after it landed.
+        for suffix in (".png", ".bin", ".svg"):
+            (settings.out_dir / f"flight{suffix}").unlink(missing_ok=True)
         return 0
-    finally:
-        store.close()
+    c = flight_design.render(
+        tracked, label=settings.label, shapes=lib, units=settings.units,
+        now=now, footnote=getattr(args, "flight_footnote", None),
+        schedule_line=getattr(args, "flight_schedule", None),
+        estimated=getattr(args, "flight_estimated", None),
+        lang=getattr(args, "flight_lang", "en"))
+    written = canvas_mod.render(c, settings.out_dir, "flight",
+                                dither=args.dither, keep_svg=args.svg)
+    print(f"flight    -> {written['png'].name}  "
+          f"({written['bin'].stat().st_size:,} bytes packed)", flush=True)
+    return 0
 
 
 def cmd_track(args, settings) -> int:
@@ -240,28 +104,6 @@ def cmd_display(args, settings) -> int:
     return 0 if ok else 1
 
 
-def cmd_coverage(args, settings) -> int:
-    """How much of what is actually overhead has a shape available."""
-    lib, aircraft = _context(settings, enrich_limit=0)
-    if not aircraft:
-        print("nothing overhead", file=sys.stderr)
-        return 1
-    have = miss = 0
-    missing: dict[str, int] = {}
-    for ac in aircraft:
-        if lib.get(ac.type) and lib.resolve(ac.type) != shapes_mod.FALLBACK:
-            have += 1
-        else:
-            miss += 1
-            missing[ac.type or "?"] = missing.get(ac.type or "?", 0) + 1
-    total = have + miss
-    print(f"shape coverage: {have}/{total} aircraft ({100 * have / total:.0f}%)")
-    if missing:
-        print("no shape for:", ", ".join(f"{k}×{v}" for k, v in
-                                         sorted(missing.items(), key=lambda kv: -kv[1])))
-    return 0
-
-
 def cmd_serve(args, settings=None) -> int:
     app = config.load_app()
     serve(app, Registry(app.registry_path), args.host, args.port)
@@ -269,49 +111,6 @@ def cmd_serve(args, settings=None) -> int:
 
 
 # -- multi-tenant service loops -------------------------------------------
-
-def cmd_run_collector(args) -> int:
-    """One process polls adsb.lol for every tenant: one fetch per distinct
-    location group per cycle (jittered), snapshot for the renderers, rows
-    into each tenant's own history DB."""
-    import random
-    app = config.load_app()
-    registry = Registry(app.registry_path)
-    while True:
-        started = time.time()
-        groups: dict[str, list[dict]] = {}
-        for tenant in registry.tenants():
-            key = sources.lockey(tenant["lat"], tenant["lon"],
-                                 tenant["radius_nm"])
-            groups.setdefault(key, []).append(tenant)
-        for key, members in groups.items():
-            first = members[0]
-            found = sources.fetch(first["lat"], first["lon"],
-                                  first["radius_nm"], app.user_agent,
-                                  min_altitude_ft=0)
-            if found is None:
-                print(f"{datetime.now():%H:%M:%S}  {key}: adsb.lol "
-                      "unreachable, skipping", flush=True)
-                continue
-            sources.write_snapshot(app.cache_dir, key, found)
-            for tenant in members:
-                floor = float(tenant["min_altitude_ft"])
-                rows = [a for a in found
-                        if a.altitude_ft is None or a.altitude_ft >= floor]
-                store = Store(app.tenant_data(tenant["id"]) / "positions.sqlite")
-                store.record(rows)
-                store.prune(args.prune)
-                store.close()
-            print(f"{datetime.now():%H:%M:%S}  {key}: {len(found):3} aircraft "
-                  f"-> {len(members)} tenant(s)", flush=True)
-            time.sleep(random.uniform(0.5, 2.0))     # jitter between groups
-        if not args.loop:
-            return 0
-        try:
-            time.sleep(max(1.0, args.loop - (time.time() - started)))
-        except KeyboardInterrupt:
-            return 0
-
 
 def cmd_run_renderer(args) -> int:
     """Render every active tenant's posters from the collector snapshots."""
@@ -322,10 +121,8 @@ def cmd_run_renderer(args) -> int:
         started = time.time()
         for tenant in registry.tenants():
             settings = config.for_tenant(app, tenant)
-            fake = argparse.Namespace(
-                design="all", dither=False, svg=False, background="blue",
-                edition=1, coords=False, mode="furthest",
-                section_km=None, loop=0)
+            fake = argparse.Namespace(design="all", dither=False,
+                                      svg=False, loop=0)
             try:
                 from . import schedule as schedule_mod
                 schedule_mod.refresh_due(registry, tenant["id"],
@@ -846,15 +643,12 @@ def cmd_migrate_legacy(args) -> int:
         return 1
     row = registry.tenant_add(
         args.id, args.name, legacy.lat, legacy.lon, legacy.label,
-        radius_nm=legacy.radius_nm, units=legacy.units_name,
+        units=legacy.units_name,
         refresh_minutes=legacy.refresh_minutes,
         awake_from=f"{legacy.awake_from:%H:%M}",
-        awake_until=f"{legacy.awake_until:%H:%M}",
-        trace_hours=legacy.trace_hours,
-        min_altitude_ft=legacy.min_altitude_ft,
-        section_radius_km=legacy.section_radius_km)
+        awake_until=f"{legacy.awake_until:%H:%M}")
     dest = app.tenant_data(args.id)
-    for name in ("positions.sqlite", "tracking.json", "display.json"):
+    for name in ("tracking.json", "display.json"):
         src = legacy.data_dir / name
         if src.exists() and not (dest / name).exists():
             shutil.copy2(src, dest / name)
@@ -885,7 +679,7 @@ def cmd_where(args, settings) -> int:
     flag = "  (PUBLIC DEFAULT — set HOME_LAT/HOME_LON in .env)" \
         if settings.is_default_location else ""
     print(f"{settings.label}: {settings.lat}, {settings.lon}{flag}")
-    print(f"radius {settings.radius_nm:.0f} nm · refresh {settings.refresh_minutes} min "
+    print(f"refresh {settings.refresh_minutes} min "
           f"· awake {settings.awake_from:%H:%M}–{settings.awake_until:%H:%M}")
     print(f"data {settings.data_dir}\nout  {settings.out_dir}\ncache {settings.cache_dir}")
     return 0
@@ -900,27 +694,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--dither", action="store_true",
                    help="Floyd-Steinberg instead of nearest colour")
     r.add_argument("--svg", action="store_true", help="also keep the source SVG")
-    r.add_argument("--background", default="blue",
-                   choices=list(palette.INKS), help="liveried: flooded background ink")
-    r.add_argument("--edition", type=int, default=1)
-    r.add_argument("--coords", action="store_true",
-                   help="liveried: print lat/lon in the footer. Off by "
-                        "default: the footer would otherwise publish the "
-                        "frame's location in every photo of it")
-    r.add_argument("--mode", default="furthest",
-                   choices=list(portrait.SUPERLATIVES), help="portrait: how to pick")
-    r.add_argument("--section-km", type=float, default=None,
-                   help="section: how far out to plot")
     r.add_argument("--loop", type=int, default=0, metavar="SECONDS",
                    help="re-render every SECONDS (0 = once)")
     r.set_defaults(fn=cmd_render)
-
-    col = sub.add_parser("collect", help="sample positions into the history database")
-    col.add_argument("--loop", type=int, default=0, metavar="SECONDS",
-                     help="keep sampling every SECONDS (0 = once)")
-    col.add_argument("--prune", type=float, default=None, metavar="HOURS",
-                     help="drop history older than HOURS after each sample")
-    col.set_defaults(fn=cmd_collect)
 
     tr = sub.add_parser("track", help="follow one flight, or 'off' to stop")
     tr.add_argument("flight", help="flight number as printed, e.g. BA117")
@@ -930,9 +706,6 @@ def main(argv: list[str] | None = None) -> int:
     dp.add_argument("design", nargs="?", help="omit to see the current choice")
     dp.set_defaults(fn=cmd_display)
 
-    cov = sub.add_parser("coverage", help="shape coverage against live traffic")
-    cov.set_defaults(fn=cmd_coverage)
-
     sv = sub.add_parser("serve", help="multi-tenant dashboard + device API")
     sv.add_argument("--port", type=int, default=8080)
     sv.add_argument("--host", default="0.0.0.0",
@@ -941,12 +714,6 @@ def main(argv: list[str] | None = None) -> int:
 
     wh = sub.add_parser("where", help="show the configured location and paths")
     wh.set_defaults(fn=cmd_where)
-
-    rc = sub.add_parser("run-collector",
-                        help="poll adsb.lol for every tenant location group")
-    rc.add_argument("--loop", type=int, default=0, metavar="SECONDS")
-    rc.add_argument("--prune", type=float, default=12, metavar="HOURS")
-    rc.set_defaults(fn2=cmd_run_collector)
 
     rr = sub.add_parser("run-renderer",
                         help="render every active tenant's posters")

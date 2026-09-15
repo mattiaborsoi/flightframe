@@ -59,7 +59,7 @@ class Tenancy(unittest.TestCase):
         # One rendered poster each, with distinct bytes.
         for tid, fill in (("t1", b"\x11"), ("t2", b"\x22")):
             out = cls.app.tenant_out(tid)
-            (out / "portrait.bin").write_bytes(fill * 960_000)
+            (out / "next.bin").write_bytes(fill * 960_000)
             (out / "trace.png").write_bytes(b"png-" + fill)
         handler = partial(Handler, app=cls.app, registry=cls.reg,
                           device=DeviceAPI(cls.app, cls.reg),
@@ -87,7 +87,7 @@ class Tenancy(unittest.TestCase):
         status, body, _ = _call(self.port, "/api/state")
         self.assertEqual(status, 401)
         status, _, _ = _call(self.port, "/api/design", "POST",
-                             {"design": "rose"})
+                             {"design": "next"})
         self.assertEqual(status, 401)
 
     def test_wrong_password_rejected(self):
@@ -123,7 +123,7 @@ class Tenancy(unittest.TestCase):
         ca = self._login("a@example.com", "pw-a")
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/api/design", method="POST",
-            data=b'{"design":"rose"}',
+            data=b'{"design":"next"}',
             headers={"Content-Type": "application/json", "Cookie": ca,
                      "Origin": "http://evil.example"})
         with self.assertRaises(urllib.error.HTTPError) as ctx:
@@ -231,8 +231,7 @@ class SettingsValidation(unittest.TestCase):
 
     def test_rejections(self):
         c = self._cookie()
-        bad = [{"lat": 91}, {"lon": -181}, {"radius_nm": 3},
-               {"radius_nm": 999}, {"refresh_minutes": 1},
+        bad = [{"lat": 91}, {"lon": -181}, {"refresh_minutes": 1},
                {"label": ""}, {"label": "x" * 41},
                {"awake_from": "25:00", "awake_until": "23:00"},
                {"awake_from": "09:00", "awake_until": "08:00"},
@@ -245,7 +244,7 @@ class SettingsValidation(unittest.TestCase):
 
     def test_acceptance(self):
         c = self._cookie()
-        good = {"lat": 45.4642, "lon": 9.19, "radius_nm": 30,
+        good = {"lat": 45.4642, "lon": 9.19,
                 "refresh_minutes": 20, "label": "Duomo",
                 "awake_from": "08:00", "awake_until": "22:30",
                 "units": "aviation", "tz": "Europe/Rome"}
@@ -335,12 +334,12 @@ class DownloadGraceWindow(unittest.TestCase):
             token = reg.device_register("g1", "0a:00:00:00:00:09", "hw")
             out = app.tenant_out("g1")
             old = b"\x11" * 960_000
-            (out / "portrait.bin").write_bytes(old)
+            (out / "next.bin").write_bytes(old)
             api = DeviceAPI(app, reg)
             old_hash = hashlib.sha256(old).hexdigest()
             # renderer rotates the poster: old becomes .prev, new lands
-            (out / "portrait.bin").replace(out / "trace.bin.prev")
-            (out / "portrait.bin").write_bytes(b"\x22" * 960_000)
+            (out / "next.bin").replace(out / "next.bin.prev")
+            (out / "next.bin").write_bytes(b"\x22" * 960_000)
             served = api.image_by_hash(token, old_hash)
             self.assertEqual(served, old)
 
