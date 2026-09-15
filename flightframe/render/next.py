@@ -30,6 +30,7 @@ STRINGS = {
         "no_flights_sub": "the sky can wait",
         "later": "And after that",
         "aircraft": "Aircraft",
+        "cancelled": "CANCELLED",
         "tail": "Tail",
         "arr": "arr. {hh}",
         "terminal": "Terminal {t}",
@@ -49,6 +50,7 @@ STRINGS = {
         "no_flights_sub": "il cielo può aspettare",
         "later": "E poi",
         "aircraft": "Aereo",
+        "cancelled": "CANCELLATO",
         "tail": "Marche",
         "arr": "arrivo {hh}",
         "terminal": "Terminal {t}",
@@ -113,8 +115,20 @@ def _row_route(row: dict, limit: int = 12) -> str:
     return f"{side('origin')} → {side('destination')}"
 
 
+def _cancelled(row: dict) -> bool:
+    """AeroDataBox spells it "Canceled"; airlines and humans "Cancelled"."""
+    return str(row.get("airline_status") or "").startswith("Cancel")
+
+
 def _countdown(days: int, t: dict) -> tuple[str, str]:
-    """(big text, ink) for the countdown block."""
+    """(big text, ink) for the countdown block.
+
+    A cancelled flight keeps its place in the list — the traveller has to
+    see it to do anything about it — but counting down to it would be a
+    lie, so the countdown says so instead.
+    """
+    if _CANCELLED_SENTINEL is days:
+        return t["cancelled"], "red"
     if days <= 0:
         return t["today"], "red"
     if days == 1:
@@ -122,6 +136,10 @@ def _countdown(days: int, t: dict) -> tuple[str, str]:
     if days <= 7:
         return t["days"].format(n=days), "yellow"
     return t["days"].format(n=days), "green"
+
+
+# Passed instead of a day count when the airline has called the flight off.
+_CANCELLED_SENTINEL = object()
 
 
 # Top-view airliner, nose-up, unit coords — the same silhouette as the app
@@ -251,7 +269,8 @@ def render(
     hidden = len(rest) - len(shown)
     hero_date = date.fromisoformat(hero["date"])
     days = (hero_date - now.date()).days
-    big, band = _countdown(days, t)
+    big, band = _countdown(
+        _CANCELLED_SENTINEL if _cancelled(hero) else days, t)
 
     # -- hero countdown ----------------------------------------------------
     # Ink, never a colour: yellow digits on paper are barely legible (the
@@ -363,7 +382,8 @@ def render(
         for row in shown:
             d2 = date.fromisoformat(row["date"])
             dd = (d2 - now.date()).days
-            small, band2 = _countdown(dd, t)
+            small, band2 = _countdown(
+                _CANCELLED_SENTINEL if _cancelled(row) else dd, t)
             _draw_aircraft(c, row, 118, y - 11, 46 if roomy else 40,
                            shapes)
             if roomy:

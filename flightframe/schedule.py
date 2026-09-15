@@ -79,6 +79,17 @@ def _utc_offset_min(stamp: str | None) -> int | None:
     return -minutes if tail[0] == "-" else minutes
 
 
+def _day_gap(base_date: str, stamp: str | None) -> int:
+    """Whole days from `base_date` to the date inside `stamp`; 0 if unknown."""
+    from datetime import date as _d
+    if not stamp or len(stamp) < 10:
+        return 0
+    try:
+        return (_d.fromisoformat(stamp[:10]) - _d.fromisoformat(base_date)).days
+    except ValueError:
+        return 0
+
+
 def _hhmm(stamp: str | None) -> str | None:
     """"2026-08-22 08:20+01:00" or ISO-T variants -> "08:20"."""
     if not stamp or len(stamp) < 16:
@@ -87,12 +98,29 @@ def _hhmm(stamp: str | None) -> str | None:
     return tail if tail[:2].isdigit() and tail[2] == ":" else None
 
 
-def _minutes_between(sched: str | None, revised: str | None) -> int | None:
-    """Delay in minutes, from same-day local timestamps; None if unknowable."""
-    s, r = _hhmm(sched), _hhmm(revised)
-    if not (s and r) or s == r:
+def _local_dt(stamp: str | None):
+    """"2026-09-14 23:50+02:00" -> an aware datetime, or None."""
+    from datetime import datetime
+    if not stamp:
         return None
-    return ((int(r[:2]) * 60 + int(r[3:])) - (int(s[:2]) * 60 + int(s[3:])))
+    try:
+        return datetime.fromisoformat(stamp.strip())
+    except ValueError:
+        return None
+
+
+def _minutes_between(sched: str | None, revised: str | None) -> int | None:
+    """Delay in minutes; None if unknowable.
+
+    Whole timestamps, never the clock face alone: a 23:50 departure put
+    back to 00:20 is thirty minutes late, and subtracting HH:MM made it
+    1,410 minutes EARLY — a number the board was saved from printing only
+    because it filters delays to positive ones.
+    """
+    a, b = _local_dt(sched), _local_dt(revised)
+    if not (a and b) or a == b:
+        return None
+    return round((b - a).total_seconds() / 60.0)
 
 
 def _aerodatabox(flight_no: str, date: str, api_key: str,
@@ -130,6 +158,11 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
             off = _utc_offset_min(revised or sched)
             if off is not None:
                 out["dep_offset_min"] = off
+            # A delay can push the departure past midnight, onto a date
+            # that is no longer the one the flight was filed under. Only
+            # the clock face was stored, so the departure instant came out
+            # a day early and took the glass a day early with it.
+            out["dep_day_offset"] = _day_gap(date, (revised or sched)) or None
         arr_t = ((arr.get("revisedTime") or {}).get("local")
                  or (arr.get("scheduledTime") or {}).get("local"))
         if _hhmm(arr_t):
@@ -140,15 +173,10 @@ def _aerodatabox(flight_no: str, date: str, api_key: str,
             # Red-eyes land the day after they leave; the board marks the
             # arrival with "+1". Dates compare in each airport's own local
             # calendar, which is exactly what a passenger's watch does.
+            # Measured from the DEPARTURE's date, not the filing date, so
+            # the board's "+1" keeps meaning "the day after you leave".
             dep_date = (revised or sched or "")[:10] or date
-            try:
-                from datetime import date as _d
-                offset = (_d.fromisoformat(arr_t[:10])
-                          - _d.fromisoformat(dep_date)).days
-                if offset > 0:
-                    out["arr_day_offset"] = offset
-            except ValueError:
-                pass
+            out["arr_day_offset"] = _day_gap(dep_date, arr_t) or None
         for side, key in ((dep, "origin"), (arr, "destination")):
             airport = side.get("airport") or {}
             iata = (airport.get("iata") or "").strip()
@@ -258,6 +286,7 @@ def refresh_due(registry, tenant_id: str, api_key: str, cache_dir,
                         f"{row['date']} {row['dep_time']}").replace(
                         tzinfo=timezone(timedelta(
                             minutes=off if off is not None else 0)))
+                    dep += timedelta(days=row.get("dep_day_offset") or 0)
                     to_dep = dep.timestamp() - now
                     if -6 * 3600 <= to_dep <= 3 * 3600:
                         cadence_s = 20 * 60

@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS upcoming_flights (
   origin_lat REAL, origin_lon REAL,         -- the dated schedule's airports
   destination_lat REAL, destination_lon REAL,
   arr_day_offset INTEGER,            -- 1 = lands the day after departure
+  dep_day_offset INTEGER,            -- 1 = a delay pushed it past midnight
   dep_offset_min INTEGER, arr_offset_min INTEGER,  -- airport UTC offsets,
                                      -- per-date so DST is already baked in
   airline_status TEXT                -- Boarding|EnRoute|Landed|Cancelled…
@@ -118,6 +119,11 @@ _MIGRATIONS = {
     # had BA607 leaving Pisa when the schedule said Venice), and the
     # tracker measured the flight from the wrong city. The dated schedule
     # knows exactly which field the aeroplane leaves from.
+    # A departure delayed past midnight belongs to the next day, and only
+    # the clock face was stored: the departure instant came out a day
+    # early, opening the takeover a day early and letting the post-flight
+    # backstop close it before the aeroplane had left.
+    10: ["ALTER TABLE upcoming_flights ADD COLUMN dep_day_offset INTEGER"],
     9: ["ALTER TABLE upcoming_flights ADD COLUMN origin_lat REAL",
         "ALTER TABLE upcoming_flights ADD COLUMN origin_lon REAL",
         "ALTER TABLE upcoming_flights ADD COLUMN destination_lat REAL",
@@ -425,7 +431,8 @@ class Registry:
                 ("dep_time", "origin", "destination", "aircraft",
                  "arr_time", "dep_terminal", "dep_gate", "delay_min",
                  "registration", "origin_city", "destination_city",
-                 "arr_day_offset", "dep_offset_min", "arr_offset_min",
+                 "arr_day_offset", "dep_day_offset",
+                 "dep_offset_min", "arr_offset_min",
                  "airline_status", "origin_lat", "origin_lon",
                  "destination_lat", "destination_lon")
                 if k in fields}

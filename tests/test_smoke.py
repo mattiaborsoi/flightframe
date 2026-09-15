@@ -755,5 +755,78 @@ class RefreshAccuracy(unittest.TestCase):
         self.assertIsNone(_reg_plausible(pyrenees, F()))
 
 
+class MidnightDelay(unittest.TestCase):
+    """A 23:50 departure put back to 00:20 belongs to the next day."""
+
+    LEG = [{
+        "departure": {"airport": {"iata": "CPH", "municipalityName": "Copenhagen",
+                                  "location": {"lat": 55.6, "lon": 12.65}},
+                      "scheduledTime": {"local": "2026-11-19 23:20+01:00"},
+                      "revisedTime": {"local": "2026-11-20 00:05+01:00"}},
+        "arrival": {"airport": {"iata": "ICN", "municipalityName": "Seoul",
+                                "location": {"lat": 37.46, "lon": 126.44}},
+                    "scheduledTime": {"local": "2026-11-20 19:00+09:00"}},
+        "status": "Delayed",
+    }]
+
+    def _parse(self):
+        from unittest.mock import patch
+        from flightframe import schedule
+        with patch.object(schedule.sources, "_get", lambda *a, **k: self.LEG):
+            return schedule.scheduled_details("SK987", "2026-11-19", "k", "ua",
+                                              provider="aerodatabox")
+
+    def test_delay_is_positive_across_midnight(self):
+        """Subtracting clock faces made this 45-minute delay read as
+        1,395 minutes EARLY."""
+        self.assertEqual(self._parse()["delay_min"], 45)
+
+    def test_departure_day_offset_is_recorded(self):
+        out = self._parse()
+        self.assertEqual(out["dep_time"], "00:05")
+        self.assertEqual(out["dep_day_offset"], 1)
+
+    def test_instants_land_on_the_right_day(self):
+        from flightframe.cli import _dep_instant, _arr_instant
+        row = dict(self._parse(), date="2026-11-19")
+        dep, arr = _dep_instant(row), _arr_instant(row)
+        self.assertEqual(dep.isoformat(), "2026-11-20T00:05:00+01:00")
+        self.assertEqual(arr.isoformat(), "2026-11-20T19:00:00+09:00")
+        self.assertGreater(arr, dep)
+
+    def test_takeover_opens_the_evening_before(self):
+        """The window for a 00:05 departure opens at 22:05 the previous
+        evening, on a date that is no longer the flight's own."""
+        from datetime import datetime, timezone, timedelta
+        from flightframe.cli import _takeover_open
+        row = dict(self._parse(), date="2026-11-19", flight_no="SK987")
+        cet = timezone(timedelta(hours=1))
+        at = lambda d, h, m: datetime(2026, 11, d, h, m, tzinfo=cet)
+        self.assertFalse(_takeover_open(row, at(19, 21, 30), None))
+        self.assertTrue(_takeover_open(row, at(19, 22, 30), None))
+        self.assertTrue(_takeover_open(row, at(20, 0, 30), None))
+
+
+class CancelledOnTheGlass(unittest.TestCase):
+    def test_a_cancelled_flight_says_so_instead_of_counting_down(self):
+        from datetime import date, timedelta
+        from flightframe.render import next as nx
+        soon = (date.today() + timedelta(days=3)).isoformat()
+        row = lambda st: {"flight_no": "BA758", "date": soon, "status": "upcoming",
+                          "origin": "LHR", "destination": "BSL",
+                          "origin_city": "London", "destination_city": "Basel",
+                          "dep_time": "13:40", "arr_time": "16:25",
+                          "airline_status": st}
+        svg = nx.render([row("Canceled"), row("Expected")], name="T",
+                        lang="it").svg()
+        self.assertIn("CANCELLATO", svg)
+        en = nx.render([row("Canceled")], name="T", lang="en").svg()
+        self.assertIn("CANCELLED", en)
+        # an untouched flight still counts down
+        ok = nx.render([row("Expected")], name="T", lang="en").svg()
+        self.assertNotIn("CANCELLED", ok)
+        self.assertIn("3 DAYS", ok)
+
+
 if __name__ == "__main__":
     unittest.main()

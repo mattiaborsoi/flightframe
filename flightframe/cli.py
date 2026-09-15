@@ -402,8 +402,11 @@ def _activate_due_flights(registry, tenant, settings) -> None:
         now_local = datetime.now(ZoneInfo(tenant["tz"]))
     except Exception:
         now_local = datetime.now()
+    from datetime import timedelta as _td
     for row in flights:
-        due = _date.fromisoformat(row["date"])
+        # The day it actually leaves, which a delay past midnight moves.
+        due = (_date.fromisoformat(row["date"])
+               + _td(days=row.get("dep_day_offset") or 0))
         cancelled = str(row.get("airline_status") or "").startswith("Cancel")
         if row["status"] == "tracking" and _blind_flight_over(row):
             current = tracker.load()
@@ -417,7 +420,13 @@ def _activate_due_flights(registry, tenant, settings) -> None:
                 registry.flight_set_status(
                     row["id"], "missed" if cancelled else "done")
             continue
-        if (due == today and free and not cancelled
+        # Today, or tomorrow when times are known: a 00:20 departure opens
+        # its two-hour window at 22:20 the evening before, and a date-only
+        # test would have let that window pass unnoticed. Without times
+        # the old whole-day behaviour stands, so only today qualifies.
+        has_times = bool(row.get("dep_time") or row.get("arr_time"))
+        day_ok = due == today or (has_times and due == today + _td(days=1))
+        if (day_ok and free and not cancelled
                 and row["status"] == "upcoming"
                 and _takeover_open(row, now_local, settings)):
             # Only rows that have never been flown: a row already in
@@ -584,7 +593,10 @@ def _arr_instant(row):
         t = datetime.fromisoformat(f"{row['date']} {row['arr_time']}")
         t = t.replace(tzinfo=timezone(timedelta(
             minutes=row["arr_offset_min"])))
-        return t + timedelta(days=row.get("arr_day_offset") or 0)
+        # arr_day_offset counts from the DEPARTURE, so a departure pushed
+        # past midnight carries the arrival with it.
+        return t + timedelta(days=(row.get("dep_day_offset") or 0)
+                             + (row.get("arr_day_offset") or 0))
     except ValueError:
         return None
 
@@ -595,8 +607,9 @@ def _dep_instant(row):
         return None
     try:
         t = datetime.fromisoformat(f"{row['date']} {row['dep_time']}")
-        return t.replace(tzinfo=timezone(timedelta(
+        t = t.replace(tzinfo=timezone(timedelta(
             minutes=row["dep_offset_min"])))
+        return t + timedelta(days=row.get("dep_day_offset") or 0)
     except ValueError:
         return None
 
@@ -649,40 +662,50 @@ def _takeover_open(row, now_local, settings) -> bool:
     with no times at all the whole-day behaviour stands (better a dull
     wait than a missed flight).
     """
-    from datetime import timedelta, timezone as _tz
-    def _at(hhmm: str, offset_min=None):
-        naive = now_local.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:5]),
-                                  second=0, microsecond=0)
-        if offset_min is None:
-            return naive
-        # airport wall clock -> absolute instant -> tenant wall clock
-        instant = naive.replace(tzinfo=_tz(timedelta(minutes=offset_min)))
-        return instant.astimezone(now_local.tzinfo)
+    from datetime import timedelta
+    def _at(hhmm: str, days: int = 0):
+        """The airport's clock face read as the frame's own — the
+        least-wrong fallback when no UTC offset was stored."""
+        return now_local.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:5]),
+                                 second=0, microsecond=0) \
+            + timedelta(days=days)
     try:
-        if row.get("dep_time"):
-            dep = _at(row["dep_time"], row.get("dep_offset_min"))
+        # The stored instant is exact: it carries the airport's own UTC
+        # offset for that date, and the extra day when a delay pushed the
+        # departure past midnight.
+        dep = _dep_instant(row)
+        if dep is not None:
             return now_local >= dep - timedelta(hours=2)
+        if row.get("dep_time"):
+            return now_local >= _at(
+                row["dep_time"], row.get("dep_day_offset") or 0) \
+                - timedelta(hours=2)
+        arr = _arr_instant(row)
+        if arr is not None:
+            return now_local >= arr - timedelta(
+                hours=_cruise_hours(row, settings) + 1)
         if row.get("arr_time"):
-            hours = 1.5
-            try:
-                enr = sources.Enricher(settings.cache_dir, settings.user_agent)
-                route = enr.route(row["flight_no"]) or {}
-                o = route.get("origin") or {}
-                d = route.get("destination") or {}
-                km = sources.haversine_nm(o["latitude"], o["longitude"],
-                                          d["latitude"],
-                                          d["longitude"]) * 1.852
-                hours = km / 800.0 + 0.4
-            except Exception:
-                pass
-            start = _at(row["arr_time"], row.get("arr_offset_min")) \
-                - timedelta(hours=hours, minutes=60)
-            if row.get("arr_day_offset"):
-                start -= timedelta(days=row["arr_day_offset"])
+            start = _at(row["arr_time"]) - timedelta(
+                hours=_cruise_hours(row, settings) + 1)
             return now_local >= start
     except (ValueError, TypeError):
         pass
     return True
+
+
+def _cruise_hours(row, settings) -> float:
+    """Rough block time from the route's length, for flights that publish
+    only an arrival time."""
+    try:
+        enr = sources.Enricher(settings.cache_dir, settings.user_agent)
+        route = enr.route(row["flight_no"]) or {}
+        o = route.get("origin") or {}
+        d = route.get("destination") or {}
+        km = sources.haversine_nm(o["latitude"], o["longitude"],
+                                  d["latitude"], d["longitude"]) * 1.852
+        return km / 800.0 + 0.4
+    except Exception:
+        return 1.5
 
 
 def _render_next(registry, tenant, settings) -> None:
