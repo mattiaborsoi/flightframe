@@ -12,9 +12,8 @@ one, and goes back to sleep.
 | ![Flying next](docs/next.png) | ![Tracked flight](docs/flight.png) | ![Charge](docs/charge.png) |
 | **Flying next** — a travel board, countdown and all, for a frame in someone else's house | **Tracked flight** — the one in the air right now, followed to the gate | **Low battery** — a dying frame explains itself |
 
-Multi-tenant: each household gets an isolated dashboard (location, poster
-design, refresh cadence, awake window, timezone, flight tracking) behind an
-invite-only login. The travel board speaks the tenant's language, fills
+Multi-tenant: each household gets an isolated dashboard (location, refresh
+cadence, awake window, timezone, flight list) behind an invite-only login. The travel board speaks the tenant's language, fills
 itself from a flight number (route, cities, times, aircraft, terminal,
 delays), follows red-eyes across midnight, and hands the glass over to live
 tracking while the flight is in the air.
@@ -36,7 +35,9 @@ tracking while the flight is in the air.
     .venv/bin/python -m flightframe.cli user add t1 you@example.com
     .venv/bin/python -m flightframe.cli serve --host 127.0.0.1
 
-Then in another terminal: `run-renderer --loop 180`.
+Then in another terminal:
+
+    .venv/bin/python -m flightframe.cli run-renderer --loop 180
 
 ## Run (production)
 
