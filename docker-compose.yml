@@ -26,8 +26,6 @@ services:
       - ./data:/data
       - ./out:/out
       - ./cache:/cache
-    depends_on:
-      - collector
 
   # Dashboard + device API. Not published directly in the cloud: caddy is the
   # only thing on 80/443, and this port stays on the compose network. The
