@@ -1,2 +1,51 @@
 FlightPortrait firmware
 Copyright (c) 2026 YODE PTE LTD
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+--------------------------------------------------------------------------
+MODIFICATIONS
+--------------------------------------------------------------------------
+
+This directory is a modified copy of https://github.com/flightportrait/frame
+at commit ce3335f. The upstream work is copyright YODE PTE LTD as above; the
+changes listed here are copyright 2026 flightframe and are released under the
+same Apache-2.0 licence. Files added by those changes carry their own
+SPDX-FileCopyrightText header; files modified from upstream are listed below.
+
+Added:
+
+  main/battery.c, main/battery.h
+      Battery sense for the Seeed EE02 board: a GPIO load switch drives the
+      divider, ten calibrated ADC samples are averaged, and the result is
+      reported to the server as an X-Battery-Mv header.
+
+  main/portal.c, main/portal.h
+      Wi-Fi provisioning over a captive portal instead of BLE. The frame
+      raises an open hotspot, shows a join QR on the panel, serves a
+      bilingual form, and writes the provisioning outcome to NVS directly.
+      Intended for a frame given to someone who cannot run a laptop tool.
+
+Modified from upstream:
+
+  main/api_client.c, main/api_client.h
+      The poster download resumes. It makes up to four attempts per wake,
+      each continuing from where the last stalled via an HTTP Range request,
+      with a ten-second stall timeout. Added the battery telemetry header.
+
+  main/wifi.c
+      Modem power-save is disabled while the radio is up. Some access points
+      drop frames buffered for a dozing station, which stalled every bulk
+      download while leaving small requests untouched.
+
+  main/app_main.c, main/CMakeLists.txt, main/Kconfig.projbuild
+      Wiring for the two additions above, behind CONFIG_FP_WIFI_PORTAL.
+
+  sdkconfig.ee02.defaults
+      802.11n frame aggregation disabled, for the same reason as the
+      power-save change: one poster per wake makes throughput irrelevant and
+      reliability across unfamiliar routers decisive.
+
+  .gitignore
+      Per-frame configuration files are excluded. They carry a deployment's
+      own server address and provisioning secret and must not be published.

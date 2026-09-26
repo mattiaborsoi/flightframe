@@ -21,6 +21,8 @@ tracking while the flight is in the air.
 ## Layout
 
     flightframe/       server: renderers, web dashboard, device API
+    firmware/          the ESP32 frame firmware (a fork, Apache-2.0 — see
+                       firmware/NOTICE; separate licence from the rest)
     tools/provision/   one-time BLE provisioning of a frame (Wi-Fi + server)
     tools/simulate_frame.py   protocol conformance check, no hardware needed
     caddy/             TLS termination for cloud deployment
@@ -54,7 +56,10 @@ over live HTTP and a device-protocol simulator.
 
 ## Licence
 
-Server code © Mattia Borsoi. The BLE provisioning tool vendors Espressif's
+Server code © Mattia Borsoi. `firmware/` is a separate work: a modified copy
+of an Apache-2.0 project, copyright YODE PTE LTD, redistributed under that
+licence with its `LICENSE`, `NOTICE` and copyright headers intact and the
+changes described in `firmware/NOTICE`. The BLE provisioning tool vendors Espressif's
 `esp_prov` modules under Apache-2.0 (see `tools/provision/vendor/`).
 The sample posters above are renders of synthetic data over the repo's
 placeholder location.

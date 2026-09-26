@@ -1,5 +1,12 @@
 # FlightPortrait firmware
 
+> **This is a modified copy.** It is a fork of
+> [flightportrait/frame](https://github.com/flightportrait/frame) at commit
+> `ce3335f`, vendored here so the server and the firmware it talks to travel
+> together. The upstream code is copyright YODE PTE LTD under Apache-2.0; see
+> `LICENSE`, and `NOTICE` for what was changed. The rest of this repository
+> is separate work under its own licence.
+
 The open source firmware and device protocol for FlightPortrait, a
 battery-powered 13.3" color e-ink frame that draws the aircraft that
 flew over your home.
