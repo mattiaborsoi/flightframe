@@ -1,0 +1,134 @@
+menu "FlightPortrait"
+
+    config FP_API_BASE
+        string "Device API base URL (compiled-in default)"
+        default "https://api.flightportrait.com"
+        help
+            The ONE compiled-in endpoint: the production domain. At
+            runtime a hand-set versioned NVS target (target_v1,
+            PROTOCOL.md §5 BYOS) takes precedence; factory reset always
+            returns the frame to this default. For bench work, enter a
+            dev/BYOS target through BLE provisioning instead of changing
+            this value.
+
+    config FP_DEV_PROVISION_SECRET
+        string "DEV ONLY: provision secret for POST /device/v1/setup"
+        default ""
+        help
+            Bench-only seed copied once into the protected factory namespace.
+            Production images MUST leave this blank; each unit is injected
+            with its own high-entropy setup credential by the factory jig.
+
+    config FP_HW_REV
+        string "Hardware revision sent during setup"
+        default "proto-e1004"
+
+    config FP_PROVISION_TIMEOUT_S
+        int "BLE provisioning transaction timeout (seconds)"
+        range 60 1800
+        default 600
+
+    config FP_FACTORY_PREP
+        bool "Factory-prep image: leave Security-2 QR on glass"
+        default n
+        help
+            Manufacturing-only behavior. Generate the unit's Security-2
+            credentials, draw the provisioning QR, set shipping state, and
+            sleep. Do not enable in field-update images.
+
+    menu "Panel pins (defaults: Seeed reTerminal E1004)"
+        config FP_PIN_EPD_SCK
+            int "EPD SPI SCK"
+            default 7
+        config FP_PIN_EPD_MOSI
+            int "EPD SPI MOSI"
+            default 9
+        config FP_PIN_EPD_CS_M
+            int "EPD CS master (left half)"
+            default 10
+        config FP_PIN_EPD_CS_S
+            int "EPD CS slave (right half)"
+            default 2
+        config FP_PIN_EPD_DC
+            int "EPD DC"
+            default 11
+        config FP_PIN_EPD_RST
+            int "EPD RST"
+            default 38
+        config FP_PIN_EPD_BUSY
+            int "EPD BUSY (low = busy)"
+            default 13
+        config FP_PIN_EPD_EN
+            int "EPD power enable"
+            default 12
+    endmenu
+
+    menu "Panel"
+        config FP_MIN_REFRESH_SPACING_S
+            int "Minimum seconds between panel refreshes"
+            range 30 86400
+            default 60
+            help
+              The firmware defends the glass regardless of what the server
+              asks for. Know the panel's own numbers before lowering this:
+              the maker suggests updating ONCE A DAY, and their published
+              reliability testing ran at 150 s intervals. Below 150 s is off
+              the tested envelope — reasonable for a demo table under
+              supervision, a deliberate choice for a frame that hangs on a
+              customer's wall for years.
+        config FP_MAX_GUARD_WAIT_S
+            int "Longest the frame stays awake waiting out the guard"
+            range 0 300
+            default 90
+            help
+              An image is already in PSRAM by the time the guard is checked,
+              and PSRAM does not survive deep sleep — sleeping the guard out
+              would cost a second 960 KB download for the same picture. So
+              the frame waits with the radio off and then blits. Past this
+              ceiling it gives up and lets the next wake carry it.
+    endmenu
+
+    menu "E1004 controls (active low)"
+        config FP_PIN_KEY0
+            int "PCB KEY0 / right-arrow: admin hold"
+            range 0 48
+            default 3
+        config FP_PIN_KEY1
+            int "PCB KEY1 / left-arrow: show a new pairing QR"
+            range 0 48
+            default 4
+        config FP_PIN_KEY2
+            int "PCB KEY2 / circular-arrow: poll now"
+            range 0 48
+            default 5
+        config FP_REPROVISION_HOLD_MS
+            int "Admin Wi-Fi re-provision hold (milliseconds)"
+            range 500 9000
+            default 2000
+        config FP_FACTORY_RESET_HOLD_MS
+            int "Admin factory reset hold (milliseconds)"
+            range 5000 30000
+            default 10000
+    endmenu
+
+
+    config FP_WIFI_PORTAL
+        bool "Provision over a captive-portal hotspot instead of BLE"
+        default n
+        help
+            The frame opens an open hotspot with a join-QR on the glass;
+            any phone browser sets Wi-Fi and (optionally) the server target.
+
+    config FP_PORTAL_AP_SSID
+        string "Captive portal hotspot name prefix"
+        depends on FP_WIFI_PORTAL
+        default "Cornice"
+
+    config FP_PIN_BAT_ADC_EN
+        int "Battery divider enable GPIO"
+        default 6
+        help
+            Load-switch enable for the battery sense divider (EE02: GPIO6).
+            The ADC input itself is GPIO1/ADC1_CH0 on the EE02 family.
+
+endmenu

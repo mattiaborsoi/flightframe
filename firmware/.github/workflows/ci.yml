@@ -1,0 +1,56 @@
+# CI for the firmware repo. Inert wherever this tree is vendored under a
+# subdirectory, since GitHub only runs workflows at a repository root.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: contract tests (plain cc)
+        run: |
+          set -e
+          for t in backoff api_base pairing_contract \
+                   provisioning_contract target_contract errlog_contract; do
+            cc -Wall -Wextra -Werror "main/${t}.c" "tests/test_${t}.c" \
+              -o "/tmp/${t}"
+            "/tmp/${t}"
+          done
+
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.3.1
+    strategy:
+      matrix:
+        profile:
+          - name: bench
+            defaults: "sdkconfig.defaults"
+          - name: production
+            defaults: "sdkconfig.defaults;sdkconfig.production.defaults"
+          - name: factory-prep
+            defaults: "sdkconfig.defaults;sdkconfig.production.defaults;sdkconfig.factory-prep.defaults"
+    steps:
+      - uses: actions/checkout@v4
+      - name: idf.py build (${{ matrix.profile.name }})
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py -B "build-${{ matrix.profile.name }}" \
+            -DSDKCONFIG="sdkconfig.ci-${{ matrix.profile.name }}" \
+            -DSDKCONFIG_DEFAULTS="${{ matrix.profile.defaults }}" \
+            build
+      - name: keep the bench artifact
+        if: matrix.profile.name == 'bench'
+        uses: actions/upload-artifact@v4
+        with:
+          name: flightportrait-${{ github.sha }}
+          path: |
+            build-bench/flightportrait.bin
+            build-bench/bootloader/bootloader.bin
+            build-bench/partition_table/partition-table.bin
+            build-bench/ota_data_initial.bin
