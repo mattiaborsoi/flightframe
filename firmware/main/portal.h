@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0 */
 #pragma once
 #include "esp_err.h"
+#include "frame_policy.h"
 
 /* Captive-portal provisioning: the phone-only replacement for the BLE flow.
  *
@@ -15,3 +16,10 @@
  *
  * Returns ESP_OK when the frame is ready to poll; an error to back off. */
 esp_err_t fp_portal_provision(void);
+
+/* Open the setup page on purpose: a held key, or a frame that has failed for
+ * a day. For anything but a missing registration it changes the Wi-Fi only,
+ * keeping the frame's token, server and tenant. Must be called on a boot
+ * where Wi-Fi has not yet been started. Restarts on save; returns
+ * ESP_ERR_TIMEOUT if nobody used it, and the frame carries on. */
+esp_err_t fp_portal_open(fp_attention_t why);

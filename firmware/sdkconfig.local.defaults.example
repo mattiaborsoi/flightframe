@@ -1,0 +1,9 @@
+# Copy to sdkconfig.local.defaults (gitignored) and set your own server.
+# FP_API_BASE must stay a dead address: the firmware treats it as the
+# vendor's cloud. Your server goes in FP_DEPLOYMENT_SERVER.
+CONFIG_FP_API_BASE="https://frame.invalid"
+CONFIG_FP_DEPLOYMENT_SERVER="https://frame.example.com"
+CONFIG_FP_DEV_PROVISION_SECRET=""
+CONFIG_FP_WIFI_PORTAL=y
+CONFIG_FP_PORTAL_AP_SSID="Frame"
+CONFIG_FP_PIN_BAT_ADC_EN=6

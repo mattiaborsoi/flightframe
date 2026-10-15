@@ -4,6 +4,7 @@ idf_component_register(
          "pairing_contract.c" "identity.c" "buttons.c" "qr_display.c"
          "provisioning.c" "provisioning_contract.c" "target_contract.c"
          "errlog.c" "errlog_contract.c"
+         "frame.c" "frame_policy.c"
     INCLUDE_DIRS "."
     REQUIRES nvs_flash esp_wifi esp_netif esp_event esp_http_client esp_http_server esp_adc
              esp-tls mbedtls json app_update esp_partition

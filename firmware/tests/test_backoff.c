@@ -18,12 +18,11 @@ int main(void)
     assert(fp_backoff_seconds(1) == 600);
     assert(fp_backoff_seconds(2) == 1200);
     assert(fp_backoff_seconds(3) == 2400);
-    assert(fp_backoff_seconds(4) == 4800);
-    assert(fp_backoff_seconds(5) == 9600);
-    assert(fp_backoff_seconds(6) == 19200);    /* last below the cap  */
-    assert(fp_backoff_seconds(7) == 21600);    /* 6 h cap             */
-    assert(fp_backoff_seconds(8) == 21600);
-    assert(fp_backoff_seconds(255) == 21600);  /* no overflow at max  */
+    assert(fp_backoff_seconds(4) == 3600);     /* 4800 capped to 1 h  */
+    assert(fp_backoff_seconds(5) == 3600);
+    assert(fp_backoff_seconds(7) == 3600);
+    assert(fp_backoff_seconds(8) == 3600);
+    assert(fp_backoff_seconds(255) == 3600);   /* no overflow at max  */
     printf("backoff: all cases pass\n");
     return 0;
 }

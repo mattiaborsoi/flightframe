@@ -49,3 +49,45 @@ Modified from upstream:
   .gitignore
       Per-frame configuration files are excluded. They carry a deployment's
       own server address and provisioning secret and must not be published.
+
+Release 1.0.0 (October 2026), further modifications:
+
+  Added main/frame.c, main/frame.h, main/frame_policy.c, main/frame_policy.h
+      Boot-time repair of state left by earlier builds, the attention page,
+      the gesture rules, and the firmware-offer rules. The pure rules are
+      host-tested in tests/test_frame_policy.c.
+
+  Server handling (main/Kconfig.projbuild, main/frame.c, main/portal.c)
+      The compiled-in FP_API_BASE is the address the firmware treats as the
+      vendor's cloud, so it is now a deliberately dead address and the real
+      server is FP_DEPLOYMENT_SERVER, stored on each frame as its own target.
+      Frames registered by earlier builds, which had the server compiled in,
+      are migrated on first boot without re-registering.
+
+  main/buttons.c, main/pairing_contract.h
+      Every key behaves the same: a tap fetches, a hold opens the Wi-Fi page,
+      and a key held through RESET factory-resets. The upstream re-pairing and
+      re-provision gestures are removed.
+
+  main/app_main.c
+      The vendor re-pairing flows are removed. After a day of consecutive
+      failures the frame shows its setup page with the reason, rather than a
+      stale image. A spurious key wake polls instead of sleeping up to 12 h.
+
+  main/portal.c, main/portal.h
+      The setup page opens in Wi-Fi-only mode, which keeps the frame's
+      registration, or full-setup mode. It no longer prints a provisioning
+      secret, escapes network names, states why it opened, and waits out the
+      panel's refresh guard rather than skipping the QR.
+
+  main/state_machine.c
+      Each failed poll logs and records its cause (Wi-Fi, name lookup, server)
+      and a separate name-lookup check distinguishes DNS faults. A firmware
+      update is confirmed as soon as the server accepts it, and a version the
+      bootloader rolled back from is never taken again.
+
+  main/backoff.c
+      The failure backoff is capped at 1 hour instead of 6.
+
+  CMakeLists.txt
+      Version 1.0.0.

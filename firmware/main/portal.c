@@ -24,6 +24,7 @@
 #include "qr_display.h"
 #include "panel.h"
 #include "wifi.h"
+#include "frame.h"
 
 static const char *TAG = "portal";
 
@@ -33,6 +34,12 @@ static const char *TAG = "portal";
 
 static EventGroupHandle_t s_events;
 #define EVT_SAVED  BIT0
+
+/* Wi-Fi-only: change the network and nothing else, so a registered frame
+ * keeps its token and stays in its tenant. Full setup: also store the
+ * server and setup code, for a frame that has none. */
+static bool s_wifi_only;
+static fp_attention_t s_reason;
 
 static wifi_ap_record_t s_scan[SCAN_MAX];
 static uint16_t s_scan_n;
@@ -93,37 +100,88 @@ static const char PAGE_HEAD[] =
     "label{font-size:14px;color:#3a5a8c}"
     "details{margin-top:10px;font-size:14px}</style><div class=card>";
 
+static const char *reason_text(fp_attention_t why)
+{
+    switch (why) {
+    case FP_ATTN_WIFI:
+        return "La cornice non riesce a collegarsi alla rete Wi-Fi salvata. "
+               "&middot; The frame can't join its saved Wi-Fi network.";
+    case FP_ATTN_DNS:
+        return "La cornice &egrave; sul Wi-Fi ma non trova il suo server "
+               "(DNS): controlla il router. &middot; The frame is on Wi-Fi but "
+               "can't look up its server (DNS): check the router.";
+    case FP_ATTN_SERVER:
+        return "La cornice &egrave; collegata ma il server non risponde. "
+               "&middot; The frame is connected but its server isn't "
+               "answering.";
+    case FP_ATTN_NEEDS_CODE:
+        return "La cornice va registrata di nuovo: inserisci il codice di "
+               "configurazione. &middot; The frame must be registered again: "
+               "enter its setup code.";
+    case FP_ATTN_USER:
+        return "Scegli la rete Wi-Fi. &middot; Choose the Wi-Fi network.";
+    default:
+        return "Collega la cornice al Wi-Fi di casa &middot; "
+               "Connect the frame to your home Wi-Fi";
+    }
+}
+
+static void send_escaped(httpd_req_t *req, const char *text)
+{
+    char out[8];
+    for (const char *c = text; *c; ++c) {
+        switch (*c) {
+        case '<': strlcpy(out, "&lt;", sizeof(out)); break;
+        case '>': strlcpy(out, "&gt;", sizeof(out)); break;
+        case '&': strlcpy(out, "&amp;", sizeof(out)); break;
+        case '"': strlcpy(out, "&quot;", sizeof(out)); break;
+        case '\'': strlcpy(out, "&#39;", sizeof(out)); break;
+        default: out[0] = *c; out[1] = 0; break;
+        }
+        httpd_resp_send_chunk(req, out, HTTPD_RESP_USE_STRLEN);
+    }
+}
+
 static esp_err_t root_get(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_send_chunk(req, PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, "<h1>Cornice / Frame</h1><p class=sub>",
+                          HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, reason_text(s_reason), HTTPD_RESP_USE_STRLEN);
     httpd_resp_send_chunk(req,
-        "<h1>Cornice / Frame</h1>"
-        "<p class=sub>Collega la cornice al Wi-Fi di casa &middot; "
-        "Connect the frame to your home Wi-Fi</p>"
-        "<form method=POST action=/save>"
+        "</p><form method=POST action=/save>"
         "<label>Rete / Network</label><select name=ssid>",
         HTTPD_RESP_USE_STRLEN);
     for (int i = 0; i < s_scan_n; i++) {
-        char row[96], ssid[33];
+        char ssid[33];
         strlcpy(ssid, (const char *)s_scan[i].ssid, sizeof(ssid));
         if (!ssid[0]) {
             continue;
         }
-        snprintf(row, sizeof(row), "<option>%s</option>", ssid);
-        httpd_resp_send_chunk(req, row, HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_chunk(req, "<option>", HTTPD_RESP_USE_STRLEN);
+        send_escaped(req, ssid);        /* a network name is not markup */
+        httpd_resp_send_chunk(req, "</option>", HTTPD_RESP_USE_STRLEN);
     }
     httpd_resp_send_chunk(req,
         "</select>"
         "<label>Password Wi-Fi</label>"
-        "<input name=pass type=password autocomplete=off>"
-        "<button>Salva / Save</button>"
-        "<details><summary>Avanzate / Advanced</summary>"
-        "<label>Server</label><input name=server value='" CONFIG_FP_API_BASE
-        "'><label>Codice / Secret</label>"
-        "<input name=secret value='" CONFIG_FP_DEV_PROVISION_SECRET "'>"
-        "</details></form>",
+        "<input name=pass type=password autocomplete=off>",
         HTTPD_RESP_USE_STRLEN);
+    if (!s_wifi_only) {
+        /* The setup code is typed, never pre-filled: this page is served on
+         * an open hotspot, and an earlier build printed the tenant secret
+         * into it for anyone who joined. */
+        httpd_resp_send_chunk(req,
+            "<label>Codice di configurazione / Setup code</label>"
+            "<input name=secret autocomplete=off>"
+            "<details><summary>Avanzate / Advanced</summary>"
+            "<label>Server</label><input name=server value='"
+            CONFIG_FP_DEPLOYMENT_SERVER "'></details>",
+            HTTPD_RESP_USE_STRLEN);
+    }
+    httpd_resp_send_chunk(req, "<button>Salva / Save</button></form>",
+                          HTTPD_RESP_USE_STRLEN);
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
@@ -175,22 +233,33 @@ static esp_err_t save_post(httpd_req_t *req)
     form_field(body, "pass", pass, sizeof(pass));
     if (form_field(body, "server", server, sizeof(server)) != 0 ||
         !server[0]) {
-        strlcpy(server, CONFIG_FP_API_BASE, sizeof(server));
+        strlcpy(server, CONFIG_FP_DEPLOYMENT_SERVER, sizeof(server));
     }
-    if (form_field(body, "secret", secret, sizeof(secret)) != 0 ||
-        !secret[0]) {
-        strlcpy(secret, CONFIG_FP_DEV_PROVISION_SECRET, sizeof(secret));
+    if (form_field(body, "secret", secret, sizeof(secret)) != 0) {
+        secret[0] = 0;
+    }
+    if (!s_wifi_only && !secret[0]) {
+        /* A frame with no registration cannot register without its code;
+         * saving the Wi-Fi alone would just strand it. Ask again. */
+        memset(pass, 0, sizeof(pass));
+        httpd_resp_set_type(req, "text/html; charset=utf-8");
+        httpd_resp_send_chunk(req, PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_chunk(req,
+            "<h1>Manca il codice / Code missing</h1><p class=sub>Serve il "
+            "codice di configurazione. &middot; The setup code is required."
+            "</p><a href=/>&larr; Indietro / Back</a>", HTTPD_RESP_USE_STRLEN);
+        return httpd_resp_send_chunk(req, NULL, 0);
     }
 
     wifi_sta_config_t sta = { 0 };
     strlcpy((char *)sta.ssid, ssid, sizeof(sta.ssid));
     strlcpy((char *)sta.password, pass, sizeof(sta.password));
     esp_err_t err = fp_wifi_store_credentials(&sta);
-    /* The target store refuses a secret paired with the compiled-default
-     * URL (upstream treats that pairing as an error) — and with compiled
-     * defaults there is nothing to store anyway: cloud_setup falls back
-     * to the built-in secret. Store a target only when actually custom. */
-    if (err == ESP_OK && strcmp(server, CONFIG_FP_API_BASE) != 0) {
+    /* Full setup stores the server as this frame's own target, with its
+     * setup code: the bring-your-own-server path the firmware was built
+     * around. Wi-Fi-only stores nothing else, so the registration, the
+     * target and the tenant are untouched. */
+    if (err == ESP_OK && !s_wifi_only) {
         err = fp_api_provisioning_target_set(server, secret);
     }
     memset(pass, 0, sizeof(pass));
@@ -225,8 +294,10 @@ static esp_err_t redirect_get(httpd_req_t *req)
 
 /* --------------------------------------------------------------- lifecycle */
 
-static esp_err_t run_portal_ui(void)
+static esp_err_t run_portal_ui(bool wifi_only, fp_attention_t why)
 {
+    s_wifi_only = wifi_only;
+    s_reason = why;
     ESP_ERROR_CHECK(esp_netif_init());
     esp_err_t loop = esp_event_loop_create_default();
     if (loop != ESP_OK && loop != ESP_ERR_INVALID_STATE) {
@@ -263,9 +334,21 @@ static esp_err_t run_portal_ui(void)
     /* The QR joins the phone to that hotspot; the portal then self-opens. */
     char qr[96];
     snprintf(qr, sizeof(qr), "WIFI:T:nopass;S:%s;;", (char *)ap.ap.ssid);
+    /* The QR is the page's only visible sign. The panel refuses to redraw
+     * within its spacing guard, and this used to skip the QR entirely when
+     * that happened: a held key shortly after a refresh showed nothing. Wait
+     * the guard out (seconds, bounded) instead. */
+    for (uint32_t waited = 0; fp_panel_wait_seconds() != 0 &&
+         waited < CONFIG_FP_MAX_GUARD_WAIT_S; ++waited) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
     nvs_handle_t nvs;
     if (nvs_open(FP_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
         uint8_t drawn = 0;
+        if (why != FP_ATTN_NONE) {
+            /* Every deliberate opening shows the QR afresh. */
+            nvs_set_u8(nvs, FP_NVS_PROV_QR_DRAWN, 0);
+        }
         nvs_get_u8(nvs, FP_NVS_PROV_QR_DRAWN, &drawn);
         if (!drawn && fp_panel_wait_seconds() == 0) {
             if (fp_qr_invalidate_cached_poster() == ESP_OK &&
@@ -389,11 +472,29 @@ esp_err_t fp_portal_provision(void)
                      creds.ssid[0];
     memset(&creds, 0, sizeof(creds));
     if (!have_wifi) {
-        return run_portal_ui();           /* restarts on success */
+        return run_portal_ui(false, FP_ATTN_FIRST_SETUP); /* restarts on save */
     }
     esp_err_t err = cloud_setup();
+    if (err == ESP_ERR_NOT_FOUND) {
+        /* Registration needed and no setup code held: retrying cannot help,
+         * and doing it silently is how a frame goes dark for days. Show the
+         * page so a person can supply the code. */
+        ESP_LOGW(TAG, "setup needs a code this frame does not hold");
+        fp_frame_failure_note(FP_ATTN_NEEDS_CODE);
+        fp_frame_attention_request(FP_ATTN_NEEDS_CODE);
+        esp_restart();
+    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "setup failed: %s", esp_err_to_name(err));
     }
     return err;
+}
+
+esp_err_t fp_portal_open(fp_attention_t why)
+{
+    /* Wi-Fi-only unless the frame genuinely needs registering. */
+    bool wifi_only = why != FP_ATTN_NEEDS_CODE && why != FP_ATTN_FIRST_SETUP;
+    ESP_LOGW(TAG, "opening setup page (%s, reason %d)",
+             wifi_only ? "Wi-Fi only" : "full setup", why);
+    return run_portal_ui(wifi_only, why);
 }

@@ -42,6 +42,8 @@ typedef enum {
     FP_BUTTON_REPAIR,
     FP_BUTTON_REPROVISION,
     FP_BUTTON_FACTORY_RESET,
+    FP_BUTTON_WIFI,         /* flightframe: open the Wi-Fi page, keep
+                             * the frame's registration            */
 } fp_button_action_t;
 
 typedef enum {

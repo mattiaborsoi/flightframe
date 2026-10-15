@@ -3,6 +3,7 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
@@ -17,6 +18,7 @@
 #include "portal.h"
 #include "provisioning.h"
 #include "state_machine.h"
+#include "frame.h"
 
 static const char *TAG = "flightportrait";
 #define FALLBACK_SLEEP_S (12u * 3600u)
@@ -41,30 +43,28 @@ static bool has_device_token(void)
     return found;
 }
 
-static esp_err_t clear_flag(const char *key)
-{
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(FP_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = nvs_set_u8(nvs, key, 0);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
-}
-
 static void sleep_after_failure(nvs_handle_t nvs)
 {
     uint8_t count = read_u8(nvs, FP_NVS_BACKOFF_N);
     uint32_t seconds = fp_backoff_seconds(count);
-    if (count < UINT8_MAX) {
-        nvs_set_u8(nvs, FP_NVS_BACKOFF_N, count + 1);
+    uint8_t next = count < UINT8_MAX ? count + 1 : count;
+    if (fp_auto_portal_due(next, CONFIG_FP_AUTO_PORTAL_FAILS)) {
+        /* flightframe: a day of failures. Stop failing quietly behind a
+         * stale poster and show the setup page with the reason, on a clean
+         * boot (the page cannot open with Wi-Fi already running). Counting
+         * restarts, so the page returns at most about once a day. */
+        nvs_set_u8(nvs, FP_NVS_BACKOFF_N, 0);
         nvs_commit(nvs);
+        nvs_close(nvs);
+        fp_attention_t why = fp_frame_failure_last();
+        fp_frame_attention_request(why != FP_ATTN_NONE ? why : FP_ATTN_SERVER);
+        esp_restart();
     }
+    nvs_set_u8(nvs, FP_NVS_BACKOFF_N, next);
+    nvs_commit(nvs);
     nvs_close(nvs);
+    ESP_LOGW(TAG, "failure %u in a row; retrying in %lu s",
+             (unsigned)next, (unsigned long)seconds);
     fp_deep_sleep(seconds);
 }
 
@@ -160,6 +160,11 @@ void app_main(void)
         }
     }
 
+    /* flightframe: remember a rolled-back update, then bring state left by
+     * any earlier build into a shape that polls. Both are idempotent. */
+    fp_frame_ota_note_rollback();
+    fp_frame_boot_repair();
+
     uint32_t boots = 0;
     nvs_get_u32(nvs, FP_NVS_BOOT_COUNT, &boots);
     nvs_set_u32(nvs, FP_NVS_BOOT_COUNT, boots + 1);
@@ -182,95 +187,29 @@ void app_main(void)
         fp_deep_sleep(fp_backoff_seconds(0));
     }
 
-    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
-        action == FP_BUTTON_NONE) {
-        /* A short admin/right-arrow press is intentionally a no-op. Resume
-         * the interrupted cadence and do not report X-Boot-Reason: button. */
+    /* flightframe: the setup page, on purpose. Either a held key, or a
+     * request left by a day of failures. Both run on this clean boot, before
+     * anything starts Wi-Fi; if nobody uses the page it times out and the
+     * frame restarts into a normal poll. */
+    fp_attention_t attention = fp_frame_attention_take();
+    if (action == FP_BUTTON_WIFI) {
+        attention = FP_ATTN_USER;
+    }
+    if (attention != FP_ATTN_NONE) {
         nvs_close(nvs);
-        fp_deep_sleep(fp_resume_sleep_seconds(FALLBACK_SLEEP_S));
+        fp_portal_open(attention);          /* restarts itself on save */
+        esp_restart();
     }
 
-    fp_prov_state_t state = fp_prov_state_get();
-    bool target_recovery = fp_api_setup_required();
+    /* flightframe: a key wake that names no key used to resume the old
+     * sleep, which falls back to 12 h on a frame with no clock. Every key
+     * means "fetch" now, so even a spurious wake just polls. */
 
-    /* A displayed nonce expires on the timer wake. Any deliberate button
-     * action also dismisses it early so the requested action is honored. */
-    if (!target_recovery &&
-        state == FP_PROV_STATE_REPAIR_VISIBLE &&
-        ((wake == FP_WAKE_TIMER &&
-          read_u8(nvs, FP_NVS_PAIR_QR_DRAWN)) ||
-         action != FP_BUTTON_NONE)) {
-        uint32_t guard = fp_panel_wait_seconds();
-        if (action == FP_BUTTON_POLL && guard != 0) {
-            /* Keep the still-live QR lifecycle intact until glass can accept
-             * the requested poster refresh. The timer wake then expires it
-             * and preserves the one-shot button live-window reason, instead
-             * of showing an invalid QR through backoff. */
-            s_deferred_button_poll = true;
-            nvs_close(nvs);
-            fp_deep_sleep(guard);
-        }
-        if (fp_repair_expire() != ESP_OK) {
-            /* Keep the visible lifecycle recoverable until the poster-hash
-             * invalidation and expiry writes are durable. */
-            sleep_after_failure(nvs);
-        }
-        state = fp_prov_state_get();
-    }
-
-    if (!target_recovery &&
-        (state == FP_PROV_STATE_REPAIR_INTENT ||
-         state == FP_PROV_STATE_REPAIR_REGISTERING ||
-         state == FP_PROV_STATE_REPAIR_VISIBLE)) {
-        nvs_close(nvs);
-        esp_err_t err = fp_repair_run();
-        if (err == ESP_OK) {
-            uint32_t remaining = fp_pairing_seconds_remaining();
-            if (remaining != 0) {
-                fp_deep_sleep(remaining);
-            }
-            err = ESP_ERR_INVALID_STATE;
-        }
-        ESP_ERROR_CHECK(nvs_open(FP_NVS_NAMESPACE, NVS_READWRITE, &nvs));
-        uint32_t guard = fp_panel_wait_seconds();
-        if (err == ESP_ERR_INVALID_STATE && guard != 0) {
-            nvs_close(nvs);
-            fp_deep_sleep(guard);
-        }
-        if (err != ESP_ERR_NOT_SUPPORTED) {
-            sleep_after_failure(nvs);
-        }
-        state = fp_prov_state_get();
-    }
-
-    if (!target_recovery && action == FP_BUTTON_REPAIR &&
-        state == FP_PROV_STATE_COMPLETE) {
-        if (clear_flag(FP_NVS_PAIR_QR_DRAWN) != ESP_OK) {
-            sleep_after_failure(nvs);
-        }
-        if (fp_prov_state_set(FP_PROV_STATE_REPAIR_INTENT) != ESP_OK) {
-            sleep_after_failure(nvs);
-        }
-        nvs_close(nvs);
-        esp_err_t err = fp_repair_run();
-        if (err == ESP_OK) {
-            uint32_t remaining = fp_pairing_seconds_remaining();
-            if (remaining != 0) {
-                fp_deep_sleep(remaining);
-            }
-            err = ESP_ERR_INVALID_STATE;
-        }
-        ESP_ERROR_CHECK(nvs_open(FP_NVS_NAMESPACE, NVS_READWRITE, &nvs));
-        uint32_t guard = fp_panel_wait_seconds();
-        if (err == ESP_ERR_INVALID_STATE && guard != 0) {
-            nvs_close(nvs);
-            fp_deep_sleep(guard);
-        }
-        if (err != ESP_ERR_NOT_SUPPORTED) {
-            sleep_after_failure(nvs);
-        }
-    }
-
+    /* flightframe: the upstream re-pairing flows are gone. They belong to
+     * the vendor's cloud; against a private server they can never complete,
+     * and a single key press used to enter one and stop the frame polling
+     * for good. fp_frame_boot_repair() clears any such state left behind. */
+    fp_prov_state_t state;
     state = fp_prov_state_get();
     bool token = has_device_token();
     bool provisioning_state =
@@ -279,18 +218,6 @@ void app_main(void)
         state == FP_PROV_STATE_SETUP_PENDING ||
         state == FP_PROV_STATE_PAIR_READY ||
         fp_api_setup_required();
-    if (action == FP_BUTTON_REPROVISION && token) {
-        if (clear_flag(FP_NVS_PROV_QR_DRAWN) != ESP_OK) {
-            sleep_after_failure(nvs);
-        }
-        if (state == FP_PROV_STATE_COMPLETE) {
-            if (fp_prov_state_set(FP_PROV_STATE_QR_READY) != ESP_OK) {
-                sleep_after_failure(nvs);
-            }
-        }
-        provisioning_state = true;
-    }
-
     if (!token || provisioning_state) {
         bool reprovision = token;
         nvs_close(nvs);

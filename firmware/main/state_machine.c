@@ -4,6 +4,8 @@
  * encrypted app NVS. The factory credential and minimal reset-cleanup journal
  * live in a separate namespace that app factory reset never erases. */
 #include "state_machine.h"
+#include "frame.h"
+#include "ota.h"
 
 #include <string.h>
 #include <time.h>
@@ -132,11 +134,30 @@ void fp_factory_reset_and_restart(void)
 fp_poll_result_t fp_poll_once(const char *boot_reason,
                               uint32_t *sleep_s_out)
 {
-    if (!boot_reason || !sleep_s_out || !fp_api_token_allowed()) {
+    if (!boot_reason || !sleep_s_out) {
+        return FP_POLL_FAILED;
+    }
+    if (!fp_api_token_allowed()) {
+        /* This used to return without a word, before the radio was even
+         * started, which is why a stuck frame's serial log showed nothing
+         * between the boot line and a six-hour sleep. */
+        ESP_LOGW(TAG, "poll skipped: token not usable (target phase %d)",
+                 fp_api_target_phase());
+        fp_frame_failure_note(FP_ATTN_SERVER);
         return FP_POLL_FAILED;
     }
     if (fp_wifi_connect(15000) != ESP_OK) {
-        fp_errlog_record(FP_ERRLOG_WARN, "wifi connect failed");
+        ESP_LOGW(TAG, "poll failed: cannot join the saved Wi-Fi network");
+        fp_errlog_record(FP_ERRLOG_WARN, "wifi join failed");
+        fp_frame_failure_note(FP_ATTN_WIFI);
+        return FP_POLL_FAILED;
+    }
+    if (!fp_frame_dns_ok()) {
+        /* Separate from "server unreachable" on purpose: a router that
+         * lost its DNS settings looked like a generic poll failure for
+         * three days, from the frame's side and the server's. */
+        fp_errlog_record(FP_ERRLOG_WARN, "dns lookup failed");
+        fp_frame_failure_note(FP_ATTN_DNS);
         return FP_POLL_FAILED;
     }
     if (fp_api_departure_cleanup_pending() &&
@@ -147,11 +168,20 @@ fp_poll_result_t fp_poll_once(const char *boot_reason,
     }
 
     fp_display_t disp;
-    if (fp_api_get_display(boot_reason, NULL, &disp) != ESP_OK) {
-        fp_errlog_record(FP_ERRLOG_WARN, "display poll failed");
+    esp_err_t derr = fp_api_get_display(boot_reason, NULL, &disp);
+    if (derr != ESP_OK) {
+        ESP_LOGW(TAG, "poll failed: server request (%s)", esp_err_to_name(derr));
+        fp_errlog_record(FP_ERRLOG_WARN, "server request failed");
+        fp_frame_failure_note(FP_ATTN_SERVER);
         return FP_POLL_FAILED;
     }
     *sleep_s_out = disp.sleep_s;
+    fp_frame_failure_note(FP_ATTN_NONE);
+    /* The server answered with this firmware's bearer: proof enough that a
+     * freshly updated image works. Confirming here, not at the end of the
+     * wake, stops a good update being rolled back merely because this wake
+     * then hit a panel guard or a download hiccup. */
+    fp_ota_confirm_if_pending();
 
     if (disp.reset) {
         fp_factory_reset_and_restart();
@@ -164,7 +194,7 @@ fp_poll_result_t fp_poll_once(const char *boot_reason,
 
     /* OTA before hash-skip: a firmware offer must land even on a wake
      * where the art is unchanged. */
-    if (disp.has_fw) {
+    if (disp.has_fw && fp_frame_fw_offer_ok(disp.fw_version)) {
         ESP_LOGI(TAG, "OTA offered: %s", disp.fw_version);
         if (fp_ota_apply(disp.fw_url, disp.fw_sha256) == ESP_OK) {
             esp_restart();

@@ -1,3 +1,4 @@
 sdkconfig.famiglia.defaults
 build-*/
 sdkconfig.mattia.defaults
+sdkconfig.local.defaults

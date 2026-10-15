@@ -131,4 +131,42 @@ menu "FlightPortrait"
             Load-switch enable for the battery sense divider (EE02: GPIO6).
             The ADC input itself is GPIO1/ADC1_CH0 on the EE02 family.
 
+    config FP_DEPLOYMENT_SERVER
+        string "This deployment's own server (bring-your-own-server)"
+        default ""
+        help
+            The server this deployment's frames talk to, stored on each frame
+            as its own target. Deliberately NOT the compiled-in FP_API_BASE:
+            the firmware treats that address as the vendor's cloud and turns
+            on flows (re-pairing, cloud unlink on reset) a private server does
+            not implement. Keep FP_API_BASE pointing at a dead address and put
+            the real server here. Frames registered by older builds, which had
+            the server compiled in, are migrated onto this on first boot.
+
+    config FP_WIFI_HOLD_MS
+        int "Hold a key this long from sleep to open the Wi-Fi page"
+        default 3000
+        help
+            Any key, tapped, fetches the current image. Held this long, it
+            opens the Wi-Fi setup page instead, keeping the frame's
+            registration so only the network changes. 0 disables it.
+
+    config FP_RESET_COMBO_HOLD_MS
+        int "Hold a key through a reset this long for a factory reset"
+        default 3000
+        help
+            The factory reset gesture: hold any key, tap RESET, keep holding.
+            Needs the reset button, so leaning on the frame cannot trigger it.
+            0 disables factory reset by button.
+
+    config FP_AUTO_PORTAL_FAILS
+        int "Consecutive failed wakes before the frame asks for attention"
+        range 0 255
+        default 24
+        help
+            After this many failed wakes in a row (about a day at the 1 h
+            backoff cap) the frame shows its setup page and QR, with the
+            reason it could not connect, instead of silently showing a stale
+            image. Then it starts counting again. 0 disables it.
+
 endmenu

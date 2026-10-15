@@ -8,7 +8,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-for t in backoff api_base pairing_contract \
+for t in backoff api_base pairing_contract frame_policy \
          provisioning_contract target_contract errlog_contract; do
     cc -Wall -Wextra -Werror "main/${t}.c" "tests/test_${t}.c" \
         -o "/tmp/fp_${t}"
