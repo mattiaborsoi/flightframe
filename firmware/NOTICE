@@ -91,3 +91,22 @@ Release 1.0.0 (October 2026), further modifications:
 
   CMakeLists.txt
       Version 1.0.0.
+
+Release 1.0.1 (October 2026), further modifications:
+
+  main/wifi.c, sdkconfig.defaults
+      The clock is set from three NTP services in turn, without lwIP's random
+      startup delay, instead of one server and a single 10 s wait. Failing
+      that, from the Date header of a plain-HTTP request to the frame's own
+      server, never earlier than the firmware's build date.
+
+  main/frame.c, main/frame.h
+      Logs the resolvers DHCP assigned and, when the server's name will not
+      resolve through them, uses public resolvers for the rest of the wake.
+
+  main/state_machine.c, main/portal.c, main/frame_policy.c, main/frame_policy.h
+      A frame that joins Wi-Fi but cannot set its clock reports that, not a
+      Wi-Fi failure. Date parsing is host-tested.
+
+  CMakeLists.txt
+      Version 1.0.1.

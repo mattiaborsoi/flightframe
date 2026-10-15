@@ -147,6 +147,14 @@ fp_poll_result_t fp_poll_once(const char *boot_reason,
         return FP_POLL_FAILED;
     }
     if (fp_wifi_connect(15000) != ESP_OK) {
+        if (fp_wifi_rssi() != 0) {
+            /* Joined, but no clock: without one TLS refuses every
+             * certificate. Not a Wi-Fi problem, so don't call it one. */
+            ESP_LOGW(TAG, "poll failed: on Wi-Fi but no time source");
+            fp_errlog_record(FP_ERRLOG_WARN, "clock sync failed");
+            fp_frame_failure_note(FP_ATTN_CLOCK);
+            return FP_POLL_FAILED;
+        }
         ESP_LOGW(TAG, "poll failed: cannot join the saved Wi-Fi network");
         fp_errlog_record(FP_ERRLOG_WARN, "wifi join failed");
         fp_frame_failure_note(FP_ATTN_WIFI);

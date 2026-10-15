@@ -20,6 +20,7 @@ typedef enum {
     FP_ATTN_SERVER = 4,       /* server unreachable or refused the frame */
     FP_ATTN_NEEDS_CODE = 5,   /* must register again; no setup code held */
     FP_ATTN_FIRST_SETUP = 6,  /* no Wi-Fi saved at all                   */
+    FP_ATTN_CLOCK = 7,        /* joined, but no time source answered     */
 } fp_attention_t;
 
 /* Every key behaves the same, so a person never needs to know which is
@@ -39,3 +40,15 @@ bool fp_auto_portal_due(uint8_t consecutive_failures, uint8_t threshold);
  * server decides what is newer; this only stops repeats and retry loops. */
 bool fp_fw_offer_acceptable(const char *offered, const char *running,
                             const char *rejected);
+
+/* Seconds since 1970 (UTC) from an HTTP Date header, the IMF-fixdate form
+ * every current server sends: "Wed, 15 Oct 2026 16:40:00 GMT". */
+bool fp_http_date_parse(const char *text, int64_t *out);
+
+/* Midnight UTC of the build date as ESP-IDF records it: "Oct 15 2026". */
+bool fp_build_date_parse(const char *text, int64_t *out);
+
+/* Whether a clock reading may be trusted for certificate checks: never
+ * before this firmware was built (a clock pushed into the past could make
+ * an expired certificate look valid), and not absurdly far beyond it. */
+bool fp_clock_plausible(int64_t candidate, int64_t build_floor);

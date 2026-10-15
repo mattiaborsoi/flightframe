@@ -3,9 +3,13 @@
 #include "frame.h"
 
 #include <string.h>
+#include <strings.h>
+#include <sys/time.h>
 
 #include "esp_app_desc.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_ota_ops.h"
 #include "lwip/netdb.h"
 #include "nvs.h"
@@ -214,19 +218,29 @@ bool fp_frame_fw_offer_ok(const char *offered_version)
     return ok;
 }
 
-bool fp_frame_dns_ok(void)
+/* The server's host name from the effective API base, without scheme,
+ * port or path. */
+static bool api_host(char *name, size_t size)
 {
     char base[FP_API_BASE_MAX];
     fp_api_base_get(base, sizeof(base));
     const char *host = strstr(base, "://");
     host = host ? host + 3 : base;
-    char name[FP_API_BASE_MAX];
     size_t n = strcspn(host, ":/");
-    if (n == 0 || n >= sizeof(name)) {
+    if (n == 0 || n >= size) {
         return false;
     }
     memcpy(name, host, n);
     name[n] = 0;
+    return true;
+}
+
+bool fp_frame_dns_ok(void)
+{
+    char name[FP_API_BASE_MAX];
+    if (!api_host(name, sizeof(name))) {
+        return false;
+    }
     struct addrinfo hints = { .ai_family = AF_INET,
                               .ai_socktype = SOCK_STREAM };
     struct addrinfo *res = NULL;
@@ -238,4 +252,98 @@ bool fp_frame_dns_ok(void)
         ESP_LOGW(TAG, "cannot resolve %s (rc %d)", name, rc);
     }
     return rc == 0;
+}
+
+static void log_dns(esp_netif_t *sta, const char *when)
+{
+    esp_netif_dns_info_t main = {0}, backup = {0};
+    esp_netif_get_dns_info(sta, ESP_NETIF_DNS_MAIN, &main);
+    esp_netif_get_dns_info(sta, ESP_NETIF_DNS_BACKUP, &backup);
+    ESP_LOGI(TAG, "dns %s: " IPSTR ", " IPSTR, when,
+             IP2STR(&main.ip.u_addr.ip4), IP2STR(&backup.ip.u_addr.ip4));
+}
+
+static void set_dns(esp_netif_t *sta, esp_netif_dns_type_t which,
+                    uint8_t a, uint8_t b, uint8_t c, uint8_t d)
+{
+    esp_netif_dns_info_t dns = {0};
+    dns.ip.type = ESP_IPADDR_TYPE_V4;
+    dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(a, b, c, d);
+    esp_netif_set_dns_info(sta, which, &dns);
+}
+
+void fp_frame_dns_heal(void)
+{
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta) {
+        return;
+    }
+    log_dns(sta, "from DHCP");
+    if (fp_frame_dns_ok()) {
+        return;
+    }
+    /* The router's resolver is broken or wrong for this device (Oct 2026:
+     * the London router handed the frame a resolver that never answered,
+     * while every other device on the network was fine). Names are only a
+     * route to the server; TLS still proves who answers. Use public
+     * resolvers for the rest of this wake; DHCP sets them again next time. */
+    set_dns(sta, ESP_NETIF_DNS_MAIN, 1, 1, 1, 1);
+    set_dns(sta, ESP_NETIF_DNS_BACKUP, 8, 8, 8, 8);
+    log_dns(sta, "fallback");
+    ESP_LOGW(TAG, "router DNS failed; public resolvers %s",
+             fp_frame_dns_ok() ? "work" : "fail too");
+}
+
+static int64_t s_http_date = -1;
+
+static esp_err_t on_date_header(esp_http_client_event_t *e)
+{
+    int64_t t;
+    if (e->event_id == HTTP_EVENT_ON_HEADER && e->header_key &&
+        e->header_value && strcasecmp(e->header_key, "Date") == 0 &&
+        fp_http_date_parse(e->header_value, &t)) {
+        s_http_date = t;
+    }
+    return ESP_OK;
+}
+
+esp_err_t fp_frame_clock_from_http(void)
+{
+    int64_t floor = 0;
+    char name[FP_API_BASE_MAX];
+    char url[FP_API_BASE_MAX + 24];
+    if (!fp_build_date_parse(esp_app_get_description()->date, &floor) ||
+        !api_host(name, sizeof(name))) {
+        return ESP_FAIL;
+    }
+    /* Plain HTTP on purpose: TLS is what the missing clock blocks. Any
+     * answer will do, a redirect included; only its Date header is read. */
+    snprintf(url, sizeof(url), "http://%s/healthz", name);
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .method = HTTP_METHOD_HEAD,
+        .timeout_ms = 8000,
+        .disable_auto_redirect = true,
+        .event_handler = on_date_header,
+    };
+    s_http_date = -1;
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = esp_http_client_perform(client);
+    esp_http_client_cleanup(client);
+    if (s_http_date < 0) {
+        ESP_LOGW(TAG, "no Date header from %s (%s)", name,
+                 esp_err_to_name(err));
+        return ESP_FAIL;
+    }
+    if (!fp_clock_plausible(s_http_date, floor)) {
+        ESP_LOGW(TAG, "ignoring implausible Date from %s", name);
+        return ESP_FAIL;
+    }
+    struct timeval tv = { .tv_sec = (time_t)s_http_date };
+    settimeofday(&tv, NULL);
+    ESP_LOGW(TAG, "clock set from %s's Date header", name);
+    return ESP_OK;
 }

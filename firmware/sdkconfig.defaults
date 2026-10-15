@@ -44,3 +44,7 @@ CONFIG_FP_REPROVISION_HOLD_MS=2000
 CONFIG_FP_FACTORY_RESET_HOLD_MS=10000
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
+
+# flightframe: each NTP server gets a short wait in turn (wifi.c). lwIP's
+# random 0-5 s startup delay would eat most of that window.
+# CONFIG_LWIP_SNTP_STARTUP_DELAY is not set

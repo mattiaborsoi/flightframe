@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 flightframe
  * SPDX-License-Identifier: Apache-2.0 */
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
 
 #include "../main/frame_policy.h"
@@ -53,5 +54,34 @@ int main(void)
     assert(fp_fw_offer_acceptable("1.0.1", "1.0.0", NULL));
 
     printf("frame_policy: all cases pass\n");
+    /* The clock fallback: an HTTP Date header, floored at the build date. */
+    int64_t t = 0;
+    assert(fp_http_date_parse("Thu, 15 Oct 2026 16:40:00 GMT", &t));
+    assert(t == 1792082400);
+    assert(fp_http_date_parse("Thu, 01 Jan 1970 00:00:00 GMT", &t) && t == 0);
+    assert(fp_http_date_parse("Tue, 29 Feb 2028 23:59:59 GMT", &t));
+    assert(t == 1835481599);
+    assert(!fp_http_date_parse("Thu, 15 Oct 2026 16:40:00 CET", &t));
+    assert(!fp_http_date_parse("Thu, 31 Sep 2026 10:00:00 GMT", &t));
+    assert(!fp_http_date_parse("Thu, 15 Foo 2026 10:00:00 GMT", &t));
+    assert(!fp_http_date_parse("Thu, 15 Oct 2026 24:00:00 GMT", &t));
+    assert(!fp_http_date_parse("Thursday, 15-Oct-26 16:40:00 GMT", &t));
+    assert(!fp_http_date_parse("", &t));
+    assert(!fp_http_date_parse(NULL, &t));
+
+    int64_t floor = 0;
+    assert(fp_build_date_parse("Oct 15 2026", &floor));
+    assert(floor == 1792022400);
+    assert(fp_build_date_parse("Oct  5 2026", &t) && t == 1791158400);
+    assert(!fp_build_date_parse("Oct 32 2026", &t));
+    assert(!fp_build_date_parse("garbage", &t));
+
+    assert(fp_clock_plausible(1792082400, floor));
+    assert(fp_clock_plausible(floor, floor));
+    assert(!fp_clock_plausible(floor - 1, floor));     /* pushed into the past */
+    assert(!fp_clock_plausible(0, floor));
+    assert(!fp_clock_plausible(floor + (int64_t)21 * 366 * 86400, floor));
+    assert(!fp_clock_plausible(1792082400, 0));        /* no floor, no trust */
+
     return 0;
 }

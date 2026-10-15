@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "esp_err.h"
+
 #include "frame_policy.h"
 
 /* Bring a frame registered by any earlier build into a state where it polls.
@@ -39,3 +41,13 @@ bool fp_frame_fw_offer_ok(const char *offered_version);
  * name doesn't resolve" in the failure report: Sunday's outage looked like a
  * generic poll failure for three days. */
 bool fp_frame_dns_ok(void);
+
+/* Second clock source for when every NTP server is out of reach: the Date
+ * header of a plain-HTTP request to the frame's own server, accepted only
+ * if it is not earlier than this firmware's build date. */
+esp_err_t fp_frame_clock_from_http(void);
+
+/* Log the resolvers DHCP gave this wake and, if the server's name will not
+ * resolve through them, switch to public resolvers for the rest of it.
+ * Call once Wi-Fi has an address, before anything looks a name up. */
+void fp_frame_dns_heal(void);

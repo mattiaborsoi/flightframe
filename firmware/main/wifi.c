@@ -14,6 +14,7 @@
 #include "freertos/event_groups.h"
 #include "nvs.h"
 
+#include "frame.h"
 #include "nvs_schema.h"
 
 static const char *TAG = "fp_wifi";
@@ -183,16 +184,30 @@ esp_err_t fp_wifi_sync_time(void)
     if (now >= 1600000000) {
         return ESP_OK;
     }
-    esp_sntp_config_t sntp = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    esp_netif_sntp_init(&sntp);
-    esp_err_t err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000));
-    esp_netif_sntp_deinit();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "SNTP sync failed; TLS unavailable");
-        return err;
+    /* flightframe: one server with one 10 s wait meant one UDP packet; lwIP
+     * waits 15 s before asking again, so a single lost reply failed the
+     * whole wake. After a power cut that was every wake (Oct 2026). Ask
+     * three independent services in turn, then the frame's own server. */
+    static const char *const servers[] = {
+        "pool.ntp.org", "time.cloudflare.com", "time.google.com",
+    };
+    esp_err_t err = ESP_FAIL;
+    for (size_t i = 0; i < sizeof(servers) / sizeof(servers[0]); ++i) {
+        esp_sntp_config_t sntp = ESP_NETIF_SNTP_DEFAULT_CONFIG(servers[i]);
+        esp_netif_sntp_init(&sntp);
+        err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(5000));
+        esp_netif_sntp_deinit();
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "clock set via SNTP (%s)", servers[i]);
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "no SNTP reply from %s", servers[i]);
     }
-    ESP_LOGI(TAG, "clock set via SNTP");
-    return ESP_OK;
+    if (fp_frame_clock_from_http() == ESP_OK) {
+        return ESP_OK;
+    }
+    ESP_LOGW(TAG, "SNTP sync failed; TLS unavailable");
+    return err;
 }
 
 esp_err_t fp_wifi_connect(int timeout_ms)
@@ -217,6 +232,7 @@ esp_err_t fp_wifi_connect(int timeout_ms)
         s_wifi_started = true;
         memset(&cfg, 0, sizeof(cfg));
         remember_ap(&ap);
+        fp_frame_dns_heal();
         return fp_wifi_sync_time();
     }
 
@@ -265,6 +281,7 @@ esp_err_t fp_wifi_connect(int timeout_ms)
      * certificate validation rejects EVERYTHING. Sync before any HTTPS.
      * (RTC keeps time through deep sleep, so this is cheap on normal
      * wakes — the sane-clock check skips the wait entirely.) */
+    fp_frame_dns_heal();       /* flightframe: SNTP needs names too */
     if (fp_wifi_sync_time() != ESP_OK) {
         return ESP_FAIL;
     }
