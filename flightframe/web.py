@@ -503,6 +503,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith(f"{DEVICE_PREFIX}/img/"):
             self._device_image(Path(path).name)
             return
+        if path.startswith(f"{DEVICE_PREFIX}/fw/"):
+            self._device_firmware(Path(path).name)
+            return
         if path == f"{DEVICE_PREFIX}/display":
             self._device_display()
             return
@@ -587,6 +590,16 @@ class Handler(BaseHTTPRequestHandler):
             print(f"frame -> {payload['_design']} ({payload['_why']}), "
                   f"sleep {payload['sleep_s']}s", flush=True)
         self._json(payload, status)
+
+    def _device_firmware(self, name: str) -> None:
+        if not name.endswith(".bin"):
+            self._send(b"not found", "text/plain", 404)
+            return
+        data = self.device.firmware_by_hash(name[:-4])
+        if data is None:
+            self._send(b"unknown firmware", "text/plain", 404)
+            return
+        self._send(data, "application/octet-stream")
 
     def _device_image(self, name: str) -> None:
         if not name.endswith(".bin"):

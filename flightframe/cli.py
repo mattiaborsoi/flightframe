@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
 import time
 from datetime import datetime
@@ -111,6 +112,54 @@ def cmd_serve(args, settings=None) -> int:
 
 
 # -- multi-tenant service loops -------------------------------------------
+
+def cmd_firmware(args) -> int:
+    """Stage frame firmware and choose which frames take it over the air.
+
+    Updates are opt-in per frame. A frame that is not opted in keeps getting
+    "firmware": null whatever the store holds, so staging an image can never
+    reach a frame that nobody can walk up to with a cable.
+    """
+    from . import firmware as firmware_mod
+    app = config.load_app()
+    store = firmware_mod.Store(app.data_dir)
+    registry = Registry(app.registry_path)
+    if args.action == "add":
+        if not args.arg:
+            print("usage: firmware add <image.bin>", file=sys.stderr)
+            return 2
+        try:
+            info = store.add(Path(args.arg))
+        except ValueError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 1
+        print(f"stored {info['version']}  sha256 {info['sha256'][:16]}…  "
+              f"{info['size']:,} bytes")
+        return 0
+    if args.action == "remove":
+        ok = store.remove(args.arg or "")
+        print("removed" if ok else "no such version")
+        return 0 if ok else 1
+    if args.action == "auto":
+        if not (args.arg and args.state):
+            print("usage: firmware auto <mac> on|off", file=sys.stderr)
+            return 2
+        ok = registry.device_set_fw_auto(args.arg, args.state == "on")
+        print(f"{args.arg}: automatic updates {args.state}" if ok
+              else "no such frame")
+        return 0 if ok else 1
+    latest = store.latest()
+    print("images:")
+    for image in store.images():
+        mark = "  <- latest" if image == latest else ""
+        print(f"  {image['version']:>9}  {image['sha256'][:16]}…  "
+              f"{image['size']:,} B{mark}")
+    print("frames:")
+    for d in registry.devices_all():
+        print(f"  {d['mac']}  {d['tenant_id']:9}  running {d['fw_version'] or '?':>7}"
+              f"  auto-update {'ON' if d.get('fw_auto') else 'off'}")
+    return 0
+
 
 def cmd_run_renderer(args) -> int:
     """Render every active tenant's posters from the collector snapshots."""
@@ -719,6 +768,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="render every active tenant's posters")
     rr.add_argument("--loop", type=int, default=0, metavar="SECONDS")
     rr.set_defaults(fn2=cmd_run_renderer)
+
+    fw = sub.add_parser("firmware", help="over-the-air frame firmware")
+    fw.add_argument("action", choices=("add", "list", "remove", "auto"))
+    fw.add_argument("arg", nargs="?",
+                    help="add: image path; remove: version; auto: frame MAC")
+    fw.add_argument("state", nargs="?", choices=("on", "off"),
+                    help="auto: opt the frame in or out")
+    fw.set_defaults(fn2=cmd_firmware)
 
     tn = sub.add_parser("tenant", help="manage tenants")
     tn.add_argument("action", choices=("add", "list", "disable", "enable",

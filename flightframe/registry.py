@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS devices (
   first_seen REAL, last_setup REAL, last_seen REAL,
   battery_mv INTEGER, rssi INTEGER, boot_reason TEXT, power_source TEXT,
   battery_history TEXT NOT NULL DEFAULT '[]',
-  pending_firmware TEXT
+  pending_firmware TEXT,             -- unused: superseded by fw_auto
+  fw_auto INTEGER NOT NULL DEFAULT 0 -- 1 = offered new firmware over the air
 );
 CREATE TABLE IF NOT EXISTS upcoming_flights (
   id INTEGER PRIMARY KEY,
@@ -123,6 +124,9 @@ _MIGRATIONS = {
     # the clock face was stored: the departure instant came out a day
     # early, opening the takeover a day early and letting the post-flight
     # backstop close it before the aeroplane had left.
+    # Over-the-air updates are opt-in per frame: a frame that cannot be
+    # reached physically must never receive one it was not chosen for.
+    11: ["ALTER TABLE devices ADD COLUMN fw_auto INTEGER NOT NULL DEFAULT 0"],
     10: ["ALTER TABLE upcoming_flights ADD COLUMN dep_day_offset INTEGER"],
     9: ["ALTER TABLE upcoming_flights ADD COLUMN origin_lat REAL",
         "ALTER TABLE upcoming_flights ADD COLUMN origin_lon REAL",
@@ -353,10 +357,11 @@ class Registry:
             return [dict(r) for r in db.execute(
                 "SELECT * FROM devices ORDER BY tenant_id, id")]
 
-    def device_clear_pending_firmware(self, device_id: int) -> None:
+    def device_set_fw_auto(self, mac: str, on: bool) -> bool:
         with self._db() as db:
-            db.execute("UPDATE devices SET pending_firmware=NULL WHERE id=?",
-                       (device_id,))
+            cur = db.execute("UPDATE devices SET fw_auto=? WHERE mac=?",
+                             (1 if on else 0, mac.lower()))
+            return cur.rowcount == 1
 
 
     # -- upcoming flights -------------------------------------------------

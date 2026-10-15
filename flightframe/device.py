@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from . import firmware as firmware_mod
 from .config import AppConfig, for_tenant
 from .display import Selection
 from .registry import Registry
@@ -85,6 +86,12 @@ class DeviceAPI:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         self._hashes[(tid, design)] = (mtime, digest)
         return digest, path
+
+    def firmware_by_hash(self, digest: str) -> bytes | None:
+        """An update image by its sha256. No bearer, like posters: the frame
+        downloads it without one, and the digest is unguessable."""
+        path = firmware_mod.Store(self.app.data_dir).path_for(digest)
+        return path.read_bytes() if path else None
 
     def image_by_hash(self, token: str, digest: str) -> bytes | None:
         """Serve a packed image by content hash.
@@ -219,21 +226,20 @@ class DeviceAPI:
             sleep_s, why = self._sleep_s(settings, tenant["tz"],
                                          device["mac"], tracked)
 
-        firmware_url = None
-        if device.get("pending_firmware"):
-            fw_path = self.app.data_dir / "firmware" / device["pending_firmware"]
-            if fw_path.exists():
-                firmware_url = f"{base_url}{PREFIX}/fw/{device['pending_firmware']}"
-            if telemetry.get("fw_version") and device["pending_firmware"].startswith(
-                    str(telemetry["fw_version"])):
-                self.registry.device_clear_pending_firmware(device["id"])
-                firmware_url = None
+        # Either a complete {url, sha256, version} object or null. The frame
+        # fails the whole poll on anything else (see firmware.py), and a frame
+        # not opted in gets null whatever the store holds.
+        firmware = firmware_mod.offer(
+            firmware_mod.Store(self.app.data_dir), device,
+            telemetry.get("fw_version"), base_url, PREFIX)
+        if firmware:
+            why += f", offering firmware {firmware['version']}"
 
         return 200, {
             "image_url": f"{base_url}{PREFIX}/img/{digest}.bin",
             "image_hash": f"sha256:{digest}",
             "sleep_s": int(sleep_s),
-            "firmware": firmware_url,
+            "firmware": firmware,
             "reset": False,
             "_design": design,      # ignored by firmware, useful in the log
             "_why": why,
