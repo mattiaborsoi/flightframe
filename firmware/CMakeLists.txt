@@ -6,6 +6,6 @@ cmake_minimum_required(VERSION 3.16)
 # that has already been uploaded — not even to retry a release. A release
 # owns its version on the server side, along with the adoption history
 # recorded against it.
-set(PROJECT_VER "1.0.1")
+set(PROJECT_VER "1.0.0")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(flightportrait)

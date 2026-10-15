@@ -110,11 +110,6 @@ static const char *reason_text(fp_attention_t why)
         return "La cornice &egrave; sul Wi-Fi ma non trova il suo server "
                "(DNS): controlla il router. &middot; The frame is on Wi-Fi but "
                "can't look up its server (DNS): check the router.";
-    case FP_ATTN_CLOCK:
-        return "La cornice &egrave; sul Wi-Fi ma non raggiunge internet "
-               "(non riesce a leggere l'ora): controlla il router. &middot; "
-               "The frame is on Wi-Fi but can't reach the internet (it "
-               "can't get the time): check the router.";
     case FP_ATTN_SERVER:
         return "La cornice &egrave; collegata ma il server non risponde. "
                "&middot; The frame is connected but its server isn't "
